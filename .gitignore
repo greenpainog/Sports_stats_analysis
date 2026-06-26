@@ -1,4 +1,6 @@
 __pycache__/
 *.pyc
 .env
-rebounds_data.csv
+rebounds_data.csvdata/full_stats.csv
+data/*.db
+data/*.csv
