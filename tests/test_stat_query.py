@@ -67,19 +67,24 @@ GAMES = [
 ]
 
 
+def build_test_league():
+    """Create the tables and load the hand-made league into the current database."""
+    create_tables()
+    for game in GAMES:
+        save_game_bundle(game)
+    # A Gamma player whose surname clashes with Sid Kick.
+    clash = _game(5, "2024-10-29", "GAM", "BET", 70, 72)
+    clash["stats"] += _player_stats(OTHER_KICK, "home", 0, 0, 0)
+    save_game_bundle(clash)
+
+
 class StatQueryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.original_db = db.DATABASE_FILE
         cls.tmp = tempfile.TemporaryDirectory()
         db.DATABASE_FILE = str(Path(cls.tmp.name) / "league.db")
-        create_tables()
-        for game in GAMES:
-            save_game_bundle(game)
-        # A Gamma player whose surname clashes with Sid Kick.
-        clash = _game(5, "2024-10-29", "GAM", "BET", 70, 72)
-        clash["stats"] += _player_stats(OTHER_KICK, "home", 0, 0, 0)
-        save_game_bundle(clash)
+        build_test_league()
 
     @classmethod
     def tearDownClass(cls):

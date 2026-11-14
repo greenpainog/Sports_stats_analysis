@@ -32,8 +32,20 @@ python -m ingestion.euroleague --season 2024 --game 1
 python -m ingestion.euroleague --season 2024    # whole season (~11 min the first time)
 
 # Run the tests
-python -m unittest discover -s tests -t .
+python -m pytest
+
+# Start the API, then open http://127.0.0.1:8000/docs
+uvicorn api.main:app --reload
 ```
+
+Example API request (`POST /query`):
+
+```json
+{"stats": ["fg3_pct"], "player": "Jerian Grant", "opponent": "Real Madrid", "venue": "away"}
+```
+
+The database path defaults to `data/sports_analytics.db` in the project folder;
+set the `SPORTS_DB_PATH` environment variable to use another file.
 
 ## Layout
 
@@ -41,7 +53,10 @@ python -m unittest discover -s tests -t .
 | --- | --- |
 | `database/` | SQLite connection, schema (`schema.py`), writes (`repositories.py`), reads (`queries.py`) |
 | `analysis/` | Stat analysis over CSV and DB, plus the keyword question parser |
-| `ask.py`, `analysis_runner.py` | Command-line entry points |
+| `api/` | FastAPI app (`main.py`) and Pydantic models including `QuerySpec` (`models.py`) |
+| `ingestion/` | Loads source data into the database (`euroleague.py`) |
+| `tests/` | pytest suite |
+| `ask.py`, `analysis_runner.py` | Older command-line entry points |
 | `legacy/` | The original Flashscore scraper, no longer used |
 | `data/` | Local database and CSV exports (git-ignored); raw API/HTML responses go in `data/raw/` |
 
@@ -67,7 +82,7 @@ least one second apart. Data files, API keys and `.env` are never committed.
 1. Euroleague ingestion (one full season) ✅ 2024-25 loaded: 330 games
 2. Team/player alias tables and name resolution ✅ `database.aliases.resolve_team()` / `resolve_player()`
 3. Query layer (opponent, home/away, last N, opponent over .500, player absent) ✅ `analysis.stat_query.query_stats()`
-4. FastAPI + Pydantic `QuerySpec` API
+4. FastAPI + Pydantic `QuerySpec` API ✅ `api/` (`POST /query`, `GET /resolve/{kind}`, `GET /stats`)
 5. LLM question → validated `QuerySpec`, with a 50-question evaluation set
 6. Greek league ingestion
 7. Docker, demo, agent for multi-step questions, Azure deployment

@@ -16,6 +16,16 @@ from dataclasses import dataclass, field
 from database.aliases import resolve_player, resolve_team
 from database.db import get_connection
 
+# Stats stored per game in game_stats. Ingestion must store exactly these
+# names (a test checks the Euroleague mapping against this list).
+COUNTING_STATS = (
+    "points", "minutes",
+    "fg2_made", "fg2_attempted", "fg3_made", "fg3_attempted", "ft_made", "ft_attempted",
+    "offensive_rebounds", "defensive_rebounds", "total_rebounds",
+    "assists", "steals", "turnovers", "blocks", "blocks_against",
+    "fouls_committed", "fouls_received", "pir", "plus_minus",
+)
+
 # Percentages are computed from summed makes and attempts. Averaging each
 # game's percentage would give a 1/1 game the same weight as a 6/14 game.
 PERCENTAGE_STATS = {
@@ -74,7 +84,8 @@ class QueryResult:
         conditions = ", ".join(f"{k}={v}" for k, v in self.filters.items()) or "all games"
         if not self.games:
             return f"{self.subject}: no games match ({conditions})."
-        lines = [f"{self.subject} ({conditions}), {len(self.games)} games:"]
+        count = len(self.games)
+        lines = [f"{self.subject} ({conditions}), {count} game{'s' if count != 1 else ''}:"]
         for s in self.summary.values():
             if s.pct is not None or s.attempted is not None:
                 pct = "n/a" if s.pct is None else f"{s.pct:.1f}%"
@@ -181,7 +192,7 @@ def query_stats(
             where.append(f"{OPPONENT_RECORD_SQL.format(op='>')} > {OPPONENT_RECORD_SQL.format(op='<')}")
         if without_player is not None:
             absent_id, absent_name = _resolve(lambda t: resolve_player(t, conn), without_player, "player")
-            filters["without"] = absent_name
+            filters["without_player"] = absent_name
             where.append(
                 "NOT EXISTS (SELECT 1 FROM game_appearances x WHERE x.game_id = tg.game_id AND x.player_id = ?)"
             )
