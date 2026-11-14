@@ -1,45 +1,181 @@
+"""Database schema for current and legacy basketball data.
+
+The original ``matches`` and ``team_match_stats`` tables are kept in place so
+existing CSV/database analysis continues to work. New collection code should
+use the competition-aware tables below.
+"""
+
 from database.db import get_connection
 
 
 def create_tables():
+    """Create the database tables without deleting existing data."""
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS matches (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT NOT NULL,
-            team1 TEXT NOT NULL,
-            team2 TEXT NOT NULL,
-            UNIQUE(date, team1, team2)
-        )
-    """)
+        # Legacy schema. Kept until the old scraper and analysis commands have
+        # been migrated to the competition-aware schema.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS matches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                team1 TEXT NOT NULL,
+                team2 TEXT NOT NULL,
+                UNIQUE(date, team1, team2)
+            )
+        """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS team_match_stats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            match_id INTEGER NOT NULL,
-            team TEXT NOT NULL,
-            stat_name TEXT NOT NULL,
-            stat_value REAL,
-            FOREIGN KEY (match_id) REFERENCES matches(id),
-            UNIQUE(match_id, team, stat_name)
-        )
-    """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS team_match_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id INTEGER NOT NULL,
+                team TEXT NOT NULL,
+                stat_name TEXT NOT NULL,
+                stat_value REAL,
+                FOREIGN KEY (match_id) REFERENCES matches(id),
+                UNIQUE(match_id, team, stat_name)
+            )
+        """)
 
-    cursor.execute("""
-        CREATE VIEW IF NOT EXISTS team_stats_view AS
-        SELECT
-            m.date,
-            m.team1,
-            m.team2,
-            s.team,
-            s.stat_name,
-            s.stat_value
-        FROM team_match_stats s
-        JOIN matches m ON m.id = s.match_id
-    """)
-    
-    
-    conn.commit()
-    conn.close()
+        cursor.execute("""
+            CREATE VIEW IF NOT EXISTS team_stats_view AS
+            SELECT m.date, m.team1, m.team2, s.team, s.stat_name, s.stat_value
+            FROM team_match_stats s
+            JOIN matches m ON m.id = s.match_id
+        """)
+
+        # A competition is a tournament such as EuroLeague or the Greek A1.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS competitions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                country TEXT,
+                gender TEXT,
+                source TEXT NOT NULL DEFAULT 'flashscore',
+                source_competition_id TEXT,
+                UNIQUE(source, source_competition_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS seasons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                competition_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                start_date TEXT,
+                end_date TEXT,
+                FOREIGN KEY (competition_id) REFERENCES competitions(id),
+                UNIQUE(competition_id, name)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS teams (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                country TEXT,
+                source TEXT NOT NULL DEFAULT 'flashscore',
+                source_team_id TEXT,
+                UNIQUE(source, source_team_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS players (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                country TEXT,
+                source TEXT NOT NULL DEFAULT 'flashscore',
+                source_player_id TEXT,
+                UNIQUE(source, source_player_id)
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS games (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                season_id INTEGER NOT NULL,
+                source TEXT NOT NULL DEFAULT 'flashscore',
+                source_game_id TEXT,
+                source_url TEXT,
+                start_time TEXT NOT NULL,
+                status TEXT,
+                home_team_id INTEGER NOT NULL,
+                away_team_id INTEGER NOT NULL,
+                home_score INTEGER,
+                away_score INTEGER,
+                FOREIGN KEY (season_id) REFERENCES seasons(id),
+                FOREIGN KEY (home_team_id) REFERENCES teams(id),
+                FOREIGN KEY (away_team_id) REFERENCES teams(id),
+                UNIQUE(source, source_game_id),
+                CHECK(home_team_id <> away_team_id)
+            )
+        """)
+
+        # Keep participation separate from stats: a player may have appeared
+        # even when a particular stat is missing or equal to zero.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS game_appearances (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id INTEGER NOT NULL,
+                player_id INTEGER NOT NULL,
+                team_id INTEGER NOT NULL,
+                started INTEGER,
+                FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+                FOREIGN KEY (player_id) REFERENCES players(id),
+                FOREIGN KEY (team_id) REFERENCES teams(id),
+                UNIQUE(game_id, player_id)
+            )
+        """)
+
+        # One table stores any named stat for either a team or player. For a
+        # player stat, team_id records the team they represented in that game.
+        # raw_value preserves the source text (for example "10/18"), while
+        # stat_value is populated when the value is numeric and analyzable.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS game_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id INTEGER NOT NULL,
+                entity_type TEXT NOT NULL CHECK(entity_type IN ('team', 'player')),
+                team_id INTEGER,
+                player_id INTEGER,
+                stat_name TEXT NOT NULL,
+                stat_value REAL,
+                raw_value TEXT,
+                unit TEXT,
+                period TEXT NOT NULL DEFAULT 'match',
+                FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+                FOREIGN KEY (team_id) REFERENCES teams(id),
+                FOREIGN KEY (player_id) REFERENCES players(id),
+                CHECK(
+                    (entity_type = 'team' AND team_id IS NOT NULL AND player_id IS NULL)
+                    OR
+                    (entity_type = 'player' AND team_id IS NOT NULL AND player_id IS NOT NULL)
+                )
+            )
+        """)
+
+        # SQLite treats NULL values as distinct in regular unique constraints,
+        # so use separate indexes to prevent duplicate stats for each entity.
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_game_team_stat
+            ON game_stats(game_id, team_id, stat_name, period)
+            WHERE entity_type = 'team'
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_game_player_stat
+            ON game_stats(game_id, player_id, stat_name, period)
+            WHERE entity_type = 'player'
+        """)
+
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_games_start_time ON games(start_time)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_games_season_time ON games(season_id, start_time)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_game_stats_name ON game_stats(stat_name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_game_appearances_player ON game_appearances(player_id, game_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_players_name ON players(name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_teams_name ON teams(name)")
+
+        conn.commit()
+    finally:
+        conn.close()

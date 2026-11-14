@@ -1,18 +1,21 @@
 import re
-
 from analysis.stat_analysis import get_available_stats, get_available_teams
+from database.queries import get_available_db_stats, get_available_db_teams
 
-
-def parse_team_query(text, file="data/full_stats.csv"):
+def parse_team_query(text, file="data/full_stats.csv", source="csv"):
     text_lower = text.lower()
 
-    stats = get_available_stats(file)
-    teams = get_available_teams(file)
+    if source == "db":
+        stats = get_available_db_stats()
+        teams = get_available_db_teams()
+    else:
+        stats = get_available_stats(file)
+        teams = get_available_teams(file)
 
     matched_stat = None
     for stat in stats:
         if stat.lower() in text_lower:
-            matched_stat = stat
+            matched_stat = stat 
             break
 
     matched_teams = []

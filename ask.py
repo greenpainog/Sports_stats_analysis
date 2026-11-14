@@ -12,7 +12,11 @@ def run():
 
     args = parser.parse_args()
 
-    query = parse_team_query(args.question, file=args.file)
+    query = parse_team_query(
+    args.question,
+    file=args.file,
+    source=args.source,
+)
 
     if not query["stat_name"]:
         raise ValueError("Could not find a known stat in the question.")
