@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
 .env
-rebounds_data.csvdata/full_stats.csv
+.venv/
+
+# Data files are never committed
+data/raw/
 data/*.db
 data/*.csv
+rebounds_data.csv
