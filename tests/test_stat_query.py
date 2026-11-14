@@ -7,6 +7,8 @@ Teams Alpha, Beta, Gamma. Games in order:
   g4 2024-10-22  Alpha 85 - 80 Beta   neutral venue; Beta was 2-0 -> over .500
 
 Shooter (Alpha) plays g2, g3, g4. Sidekick (Alpha) plays g2, g3 only.
+g5 2024-10-29  Gamma 70 - 72 Beta (adds Olly Kick, so "Kick" is ambiguous)
+g6 2025-10-07  Alpha 77 - 70 Gamma, season 2025-26, no Alpha player stats
 """
 import tempfile
 import unittest
@@ -35,7 +37,8 @@ def _player_stats(player, side, made3, att3, assists):
     ]
 
 
-def _game(code, day, home, away, home_score, away_score, neutral=False, alpha_players=()):
+def _game(code, day, home, away, home_score, away_score, neutral=False, alpha_players=(),
+          season="2024-25"):
     alpha_side = "home" if home == "ALP" else "away"
     stats = [
         {"entity_type": "team", "team": "home", "stat_name": "total_rebounds", "stat_value": 30 + code},
@@ -46,7 +49,7 @@ def _game(code, day, home, away, home_score, away_score, neutral=False, alpha_pl
     return {
         "source": "test", "source_game_id": f"g{code}",
         "competition": {"name": "Test League", "source_competition_id": "T"},
-        "season": {"name": "2024-25"},
+        "season": {"name": season},
         "home_team": TEAMS[home], "away_team": TEAMS[away],
         "start_time": f"{day}T19:00:00Z",
         "home_score": home_score, "away_score": away_score,
@@ -64,6 +67,8 @@ GAMES = [
           alpha_players=[(SHOOTER, 6, 14, 4), (SIDEKICK, 1, 1, 1)]),
     _game(4, "2024-10-22", "ALP", "BET", 85, 80, neutral=True,
           alpha_players=[(SHOOTER, 2, 5, 6)]),
+    # Next season; Sid Kick has not played for Alpha in 2025-26.
+    _game(6, "2025-10-07", "ALP", "GAM", 77, 70, season="2025-26"),
 ]
 
 
@@ -122,8 +127,20 @@ class StatQueryTests(unittest.TestCase):
 
     def test_without_player(self):
         result = query_stats(["total_rebounds"], team="Alpha", without_player="Sid Kick")
+        # g4: same season, he missed it. g6 (2025-26) does not count: he has
+        # not played for Alpha that season, so it is not a game "without" him.
         self.assertEqual([g.game_id for g in result.games], [4])
         self.assertEqual(result.summary["total_rebounds"].total, 34)  # Alpha home in g4
+
+    def test_without_player_only_counts_his_teams(self):
+        # Beta's games vs Gamma (g1, g5) involve neither of Sid Kick's teams.
+        result = query_stats(["total_rebounds"], team="Gamma", without_player="Sid Kick")
+        self.assertEqual(result.games, [])
+
+    def test_without_player_counts_when_he_plays_for_the_opponent(self):
+        # Beta vs Alpha in g4: Sid Kick (Alpha, opponent) missed it.
+        result = query_stats(["total_rebounds"], team="Beta", without_player="Sid Kick")
+        self.assertEqual([g.game_id for g in result.games], [4])
 
     def test_team_stats_and_scores_from_teams_point_of_view(self):
         result = query_stats(["total_rebounds"], team="Alpha", venue="away")

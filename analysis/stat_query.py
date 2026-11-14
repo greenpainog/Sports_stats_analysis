@@ -150,7 +150,10 @@ def query_stats(
     venue: "home", "away" or "neutral" (from the subject's point of view).
     opponent_over_500: only games where the opponent had more wins than
         losses in that season before the game.
-    without_player: only games in which this player did not appear.
+    without_player: only games this player missed, in seasons when he played
+        for the subject's team or the opponent (so games from before he
+        joined do not count). Season-level: after a mid-season move, his old
+        team's later games still count as "without" him.
     season: season name such as "2024-25". phase: e.g. "regular_season".
     """
     if (player is None) == (team is None):
@@ -193,10 +196,16 @@ def query_stats(
         if without_player is not None:
             absent_id, absent_name = _resolve(lambda t: resolve_player(t, conn), without_player, "player")
             filters["without_player"] = absent_name
-            where.append(
-                "NOT EXISTS (SELECT 1 FROM game_appearances x WHERE x.game_id = tg.game_id AND x.player_id = ?)"
-            )
-            params.append(absent_id)
+            # Missed this game, AND played for one of these two teams in the
+            # same season. Without the second part, every game from before
+            # the player joined would count as a game "without" him.
+            where.append("""
+                NOT EXISTS (SELECT 1 FROM game_appearances x
+                            WHERE x.game_id = tg.game_id AND x.player_id = ?)
+                AND EXISTS (SELECT 1 FROM game_appearances r JOIN games rg ON rg.id = r.game_id
+                            WHERE r.player_id = ? AND rg.season_id = tg.season_id
+                              AND r.team_id IN (tg.team_id, tg.opponent_id))""")
+            params += [absent_id, absent_id]
         if season is not None:
             filters["season"] = season
             where.append("tg.season_id IN (SELECT id FROM seasons WHERE name = ?)")
