@@ -64,6 +64,10 @@ def _resolve_names(data):
         if data.get(name) is not None:
             match = resolve(data[name])
             data[name] = match.id if match.status == "match" else data[name]
+    threshold = data.get("player_threshold")
+    if threshold:
+        match = resolve_player(threshold["player"])
+        threshold["player"] = match.id if match.status == "match" else threshold["player"]
     return data
 
 

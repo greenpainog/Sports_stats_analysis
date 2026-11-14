@@ -54,8 +54,10 @@ def parse(question, *outputs):
 
 def test_llm_schema_has_every_queryspec_field():
     assert set(LLMQuerySpec.model_fields) == set(QuerySpec.model_fields) | {"answerable", "reason"}
-    from api.models import CompareSide
+    from api.models import CompareSide, PlayerThreshold
+    from llm.question_parser import LLMPlayerThreshold
     assert set(LLMCompareSide.model_fields) == set(CompareSide.model_fields)
+    assert set(LLMPlayerThreshold.model_fields) == set(PlayerThreshold.model_fields)
 
 
 def test_instructions_name_the_loaded_and_current_season():

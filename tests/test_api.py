@@ -48,6 +48,11 @@ def test_queryspec_accepts_a_valid_question():
     {"stats": ["assists"], "player": "Nunn", "compare": [{"player": "X"}, {"venue": "home"}]},  # subject in a side
     {"stats": ["assists"], "player": "Nunn", "max_rest_hours": 48,
      "compare": [{"min_rest_hours": 72}, {"venue": "home"}]},                                   # invalid once merged
+    {"stats": ["assists"], "team": "Alpha", "player_threshold": {"player": "Shooter", "stat": "assists"}},  # no range
+    {"stats": ["assists"], "team": "Alpha",
+     "player_threshold": {"player": "Shooter", "stat": "fg3_pct", "min": 1}},                  # not a per-game stat
+    {"stats": ["assists"], "team": "Alpha",
+     "player_threshold": {"player": "Shooter", "stat": "assists", "min": 5, "max": 2}},       # min > max
 ])
 def test_queryspec_rejects_invalid_questions(bad):
     with pytest.raises(ValidationError):
@@ -168,3 +173,42 @@ def test_compare_home_and_away_splits_all_games(client):
 
 def test_no_compare_means_no_comparison(client):
     assert client.post("/query", json={"stats": ["total_rebounds"], "team": "Alpha"}).json()["comparison"] is None
+
+
+# Shooter's assists: g2 2, g3 4, g4 6. He did not play g6 or g7.
+def _threshold(**bounds):
+    return {"player": "Shooter", "stat": "assists", **bounds}
+
+
+def test_player_threshold_min_and_max(client):
+    at_least_4 = client.post("/query", json={
+        "stats": ["total_rebounds"], "team": "Alpha", "player_threshold": _threshold(min=4)}).json()
+    assert [g["game_id"] for g in at_least_4["games"]] == [3, 4]
+    assert at_least_4["filters"] == {"player_threshold": "Sam Shooter assists >= 4"}
+    # Games he missed never count, so "at most 2" is only g2, not g6 or g7.
+    at_most_2 = client.post("/query", json={
+        "stats": ["total_rebounds"], "team": "Alpha", "player_threshold": _threshold(max=2)}).json()
+    assert [g["game_id"] for g in at_most_2["games"]] == [2]
+
+
+def test_player_threshold_on_the_subjects_own_stat(client):
+    body = client.post("/query", json={
+        "stats": ["fg3_pct"], "player": "Shooter", "player_threshold": _threshold(min=4)}).json()
+    assert body["summary"]["fg3_pct"]["made"] == 8 and body["summary"]["fg3_pct"]["attempted"] == 19
+
+
+def test_compare_player_threshold_splits_his_games(client):
+    body = client.post("/query", json={
+        "stats": ["total_rebounds"], "team": "Alpha",
+        "compare": [{"label": "4+", "player_threshold": _threshold(min=4)},
+                    {"label": "under 4", "player_threshold": _threshold(max=3)}],
+    }).json()
+    high, low = ([g["game_id"] for g in side["result"]["games"]] for side in body["comparison"])
+    assert (sorted(high), low) == ([3, 4], [2])
+
+
+def test_player_threshold_unknown_player_is_400(client):
+    response = client.post("/query", json={
+        "stats": ["total_rebounds"], "team": "Alpha",
+        "player_threshold": {"player": "Nobody Atall", "stat": "minutes", "min": 10}})
+    assert response.status_code == 400

@@ -167,6 +167,7 @@ def query_stats(
     phase=None,
     max_rest_hours=None,
     min_rest_hours=None,
+    player_threshold=None,
 ):
     """Return a QueryResult for one player or one team.
 
@@ -185,6 +186,10 @@ def query_stats(
         its previous loaded game (e.g. max_rest_hours=48 for two games within
         48 hours). A team's first loaded game has no rest value and is left
         out by these filters. Only loaded competitions count (see above).
+    player_threshold: {"player", "stat", "min", "max"}: only games in which
+        this player played and his `stat` in that game was at least `min`
+        and/or at most `max` (both inclusive), e.g. Lessort, minutes, min 30.
+        Games he missed never count, not even for "max".
     """
     for name, hours in (("max_rest_hours", max_rest_hours), ("min_rest_hours", min_rest_hours)):
         if hours is not None and hours <= 0:
@@ -199,6 +204,15 @@ def query_stats(
         raise QueryError("last_n must be at least 1.")
     if not stats:
         raise QueryError("Ask for at least one stat.")
+    if player_threshold is not None:
+        threshold_stat = player_threshold.get("stat")
+        low, high = player_threshold.get("min"), player_threshold.get("max")
+        if threshold_stat not in COUNTING_STATS:
+            raise QueryError(f"player_threshold stat must be one of: {', '.join(COUNTING_STATS)}.")
+        if low is None and high is None:
+            raise QueryError("player_threshold needs a min, a max or both.")
+        if low is not None and high is not None and low > high:
+            raise QueryError("player_threshold min cannot be more than max.")
 
     conn = get_connection()
     try:
@@ -267,6 +281,27 @@ def query_stats(
             filters["min_rest_hours"] = min_rest_hours
             where.append("tg.rest_hours >= ?")
             params.append(min_rest_hours)
+
+        if player_threshold is not None:
+            threshold_id, threshold_name = _resolve(
+                lambda t: resolve_player(t, conn), player_threshold["player"], "player"
+            )
+            # Uses the uq_game_player_stat index (game_id, player_id, stat_name).
+            condition = ["ps.game_id = tg.game_id", "ps.entity_type = 'player'",
+                         "ps.player_id = ?", "ps.stat_name = ?"]
+            threshold_params = [threshold_id, threshold_stat]
+            bounds = []
+            if low is not None:
+                condition.append("ps.stat_value >= ?")
+                threshold_params.append(low)
+                bounds.append(f">= {low:g}")
+            if high is not None:
+                condition.append("ps.stat_value <= ?")
+                threshold_params.append(high)
+                bounds.append(f"<= {high:g}")
+            filters["player_threshold"] = f"{threshold_name} {threshold_stat} {' and '.join(bounds)}"
+            where.append(f"EXISTS (SELECT 1 FROM game_stats ps WHERE {' AND '.join(condition)})")
+            params += threshold_params
 
         sql = f"""{TEAM_GAMES_CTE}
             SELECT tg.game_id, tg.start_time, opp.name, tg.venue, tg.team_score, tg.opponent_score,

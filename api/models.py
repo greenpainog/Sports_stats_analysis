@@ -4,6 +4,7 @@ QuerySpec is the one structured description of a stat question. The API takes
 it as input, and in phase 5 the LLM's only job is to produce a valid QuerySpec.
 Field descriptions end up in the JSON schema, which the LLM will see.
 """
+import json
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -13,8 +14,28 @@ from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS, RESULT_STATS
 # Literal[...] from the tuples gives the JSON schema an exact list of allowed
 # values, so an unknown stat name is rejected before any SQL runs.
 StatName = Literal[COUNTING_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS]
+CountingStatName = Literal[COUNTING_STATS]
 Venue = Literal["home", "away", "neutral"]
 Phase = Literal["regular_season", "play_in", "playoffs", "final_four"]
+
+
+class PlayerThreshold(BaseModel):
+    """Only games in which this player played and his stat in that game was in range."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    player: str = Field(description="The player whose game stat decides which games count, e.g. 'Lessort'.")
+    stat: CountingStatName = Field(description="A per-game stat of that player, e.g. 'minutes' or 'points'.")
+    min: Optional[float] = Field(None, ge=0, description="At least this much in the game (inclusive).")
+    max: Optional[float] = Field(None, ge=0, description="At most this much in the game (inclusive).")
+
+    @model_validator(mode="after")
+    def check_range(self):
+        if self.min is None and self.max is None:
+            raise ValueError("player_threshold needs a min, a max or both.")
+        if self.min is not None and self.max is not None and self.min > self.max:
+            raise ValueError("player_threshold min cannot be more than max.")
+        return self
 
 
 class Filters(BaseModel):
@@ -47,6 +68,13 @@ class Filters(BaseModel):
     min_rest_hours: Optional[float] = Field(
         None, gt=0, le=24 * 365,
         description="Only games played at least this many hours after the team's previous game.",
+    )
+    player_threshold: Optional[PlayerThreshold] = Field(
+        None,
+        description=(
+            "Only games where a player's own stat was in a range, e.g. 'when Lessort plays 30+ minutes' "
+            "or 'when Nunn scores 20+'. Games that player missed never count."
+        ),
     )
 
 
@@ -104,7 +132,7 @@ class QuerySpec(Filters):
             own = side.model_dump(exclude={"label"}, exclude_defaults=True)
             if not own:
                 raise ValueError("Each compare side needs at least one filter.")
-            key = tuple(sorted(own.items()))
+            key = json.dumps(own, sort_keys=True)
             if key in seen:
                 raise ValueError("Two compare sides have the same filters.")
             seen.add(key)

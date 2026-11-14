@@ -74,6 +74,15 @@ at the top level, and each side lists only what differs:
 ```
 
 The response has the result for the shared filters plus `comparison`, one result per side.
+
+`player_threshold` keeps only games where a player's own number in that game was in a range
+(`min`/`max`, both inclusive). Games that player missed never count. It works for any per-game
+stat and inside compare sides:
+
+```json
+{"stats": ["total_rebounds"], "team": "Panathinaikos",
+ "player_threshold": {"player": "Lessort", "stat": "minutes", "min": 30}}
+```
 `/ask` builds these from questions like "Panathinaikos turnovers when Nunn is out vs playing".
 
 The database path defaults to `data/sports_analytics.db` in the project folder;
@@ -117,6 +126,6 @@ least one second apart. Data files, API keys and `.env` are never committed.
 2. Team/player alias tables and name resolution ✅ `database.aliases.resolve_team()` / `resolve_player()`
 3. Query layer (opponent, home/away, last N, opponent over .500, player absent) ✅ `analysis.stat_query.query_stats()`
 4. FastAPI + Pydantic `QuerySpec` API ✅ `api/` (`POST /query`, `GET /resolve/{kind}`, `GET /stats`)
-5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 56/56 and 12/12 held-out with gpt-6-luna on 2026-11-15
+5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 60/60 and 12/12 held-out with gpt-6-luna on 2026-11-15
 6. Greek league ingestion
 7. Docker, demo, agent for multi-step questions, Azure deployment

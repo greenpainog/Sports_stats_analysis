@@ -20,7 +20,7 @@ from typing import Callable, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
-from api.models import CompareSide, QuerySpec
+from api.models import CompareSide, PlayerThreshold, QuerySpec
 from database.db import get_connection
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -30,12 +30,22 @@ DEFAULT_MODEL = "gpt-6-luna"
 # plus `answerable` and `reason`. Nothing has a default, because strict
 # Structured Outputs requires every field to be present. Range checks
 # (last_n >= 1, season format, ...) are left to QuerySpec afterwards.
-def _llm_fields(model):
-    return {name: (info.annotation, Field(description=info.description)) for name, info in model.model_fields.items()}
+def _llm_fields(model, **replace):
+    """Field types and descriptions only: no defaults or range checks (QuerySpec checks those)."""
+    return {
+        name: (replace.get(name, info.annotation), Field(description=info.description))
+        for name, info in model.model_fields.items()
+    }
 
 
-LLMCompareSide = create_model("LLMCompareSide", __config__=ConfigDict(extra="forbid"), **_llm_fields(CompareSide))
-_SPEC_FIELDS = _llm_fields(QuerySpec)
+LLMPlayerThreshold = create_model(
+    "LLMPlayerThreshold", __config__=ConfigDict(extra="forbid"), **_llm_fields(PlayerThreshold)
+)
+_THRESHOLD = {"player_threshold": Optional[LLMPlayerThreshold]}
+LLMCompareSide = create_model(
+    "LLMCompareSide", __config__=ConfigDict(extra="forbid"), **_llm_fields(CompareSide, **_THRESHOLD)
+)
+_SPEC_FIELDS = _llm_fields(QuerySpec, **_THRESHOLD)
 _SPEC_FIELDS["compare"] = (Optional[list[LLMCompareSide]], Field(description=QuerySpec.model_fields["compare"].description))
 LLMQuerySpec = create_model(
     "LLMQuerySpec",
@@ -88,6 +98,7 @@ How to fill the spec:
 - "against teams over .500"/"winning teams"/"teams with a winning record" -> opponent_over_500 true.
 - "when X doesn't play"/"without X" -> without_player; "with X"/"when X plays" -> with_player.
 - "back-to-back", "short rest", "two games in two days", "within 48 hours" -> max_rest_hours 48. "N days of rest or less" -> max_rest_hours N*24. "well rested", "3+ days of rest" -> min_rest_hours 72 (or N*24 if a number of days is given).
+- A condition on another player's own numbers in the game ("when Theis plays 30+ minutes", "when Hifi scores 20 or more", "when Nebo gets under 5 rebounds") -> player_threshold {{player, stat, min and/or max}}. min and max are inclusive: "30+ minutes"/"at least 30"/"more than 30 minutes" -> min 30; "under 15 minutes"/"less than 15 minutes" -> max 15; for whole-number stats, "more than 20 points" -> min 21 and "fewer than 5 rebounds" -> max 4. A threshold on the subject player's own stat works the same way.
 - "playoffs" -> phase "playoffs"; "Final Four" -> "final_four"; "regular season" -> "regular_season"; "play-in" -> "play_in".
 - Stats: rebounds -> total_rebounds; "3-point %"/"three-point shooting" -> fg3_pct; "threes"/"3s made" -> fg3_made; "free throw %" -> ft_pct; "field goal %" or plain "shooting" -> fg_pct; "2-point %" -> fg2_pct; PIR/efficiency/index rating -> pir; fouls -> fouls_committed; "fouls drawn" -> fouls_received; "record"/"win percentage"/"how many wins"/"how did they do" -> win_pct. If no stat is named ("how did he play", "his stats") -> points, total_rebounds, assists.
 - Leave every filter that the question does not mention at null (or false for opponent_over_500).
