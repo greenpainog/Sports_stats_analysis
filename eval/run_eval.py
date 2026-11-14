@@ -3,6 +3,7 @@
     python -m eval.run_eval                 # all 50 questions (costs a few cents)
     python -m eval.run_eval --only q19,q26  # just these
     python -m eval.run_eval --check-gold    # no LLM: check every gold spec runs
+    python -m eval.run_eval --file eval/heldout_questions.jsonl   # questions written by the user
 
 Scoring, per question:
   - gold is null (unanswerable): correct if the LLM said unanswerable.
@@ -99,12 +100,13 @@ def check_gold(questions):
 def main(argv=None):
     sys.stdout.reconfigure(encoding="utf-8")  # names like Valančiūnas on Windows consoles
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--file", type=Path, default=QUESTIONS_FILE, help="Questions file (JSON lines)")
     parser.add_argument("--only", help="Comma-separated question ids, e.g. q01,q19")
     parser.add_argument("--model", help="OpenAI model (default: OPENAI_MODEL or gpt-6-luna)")
     parser.add_argument("--check-gold", action="store_true", help="Only check the gold specs; no LLM calls")
     args = parser.parse_args(argv)
 
-    questions = load_questions()
+    questions = load_questions(args.file)
     if args.only:
         wanted = set(args.only.split(","))
         questions = [q for q in questions if q["id"] in wanted]
@@ -147,7 +149,7 @@ def main(argv=None):
                   f"{r['predicted'] if r['predicted'] is not None else r['status'] + ': ' + str(r['reason'])}")
 
     RESULTS_DIR.mkdir(exist_ok=True)
-    out = RESULTS_DIR / f"{datetime.now():%Y%m%d-%H%M%S}-{llm.model}.json"
+    out = RESULTS_DIR / f"{datetime.now():%Y%m%d-%H%M%S}-{args.file.stem}-{llm.model}.json"
     out.write_text(json.dumps({"model": llm.model, "accuracy": correct / total, "spec_exact": exact / total,
                                "results": rows}, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"\nSaved {out.relative_to(EVAL_DIR.parent)}")
