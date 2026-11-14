@@ -1,3 +1,4 @@
+from database.aliases import save_aliases
 from database.db import get_connection
 
 
@@ -160,6 +161,24 @@ def save_game_bundle(game_data):
             cursor, "teams", away["name"], source,
             away.get("source_team_id"), {"country": away.get("country")},
         )
+        for team, team_id in ((home, home_team_id), (away, away_team_id)):
+            save_aliases(cursor, "team", team_id, [team["name"], *team.get("aliases", [])])
+
+        # A player appears in the appearances list and in ~20 stat items.
+        # Look each one up (and save their aliases) only once per game.
+        player_ids = {}
+
+        def get_player_id(player):
+            key = player.get("source_player_id") or player["name"]
+            if key not in player_ids:
+                player_id = _find_or_create_named_row(
+                    cursor, "players", player["name"], source,
+                    player.get("source_player_id"), {"country": player.get("country")},
+                )
+                save_aliases(cursor, "player", player_id, [player["name"]], expand=True)
+                save_aliases(cursor, "player", player_id, player.get("aliases", []))
+                player_ids[key] = player_id
+            return player_ids[key]
 
         source_game_id = game_data.get("source_game_id")
         if source_game_id is not None:
@@ -217,11 +236,7 @@ def save_game_bundle(game_data):
             if side not in ("home", "away"):
                 raise ValueError("Each appearance must identify 'home' or 'away'.")
             team_id = home_team_id if side == "home" else away_team_id
-            player = appearance["player"]
-            player_id = _find_or_create_named_row(
-                cursor, "players", player["name"], source,
-                player.get("source_player_id"), {"country": player.get("country")},
-            )
+            player_id = get_player_id(appearance["player"])
             _save_appearance(
                 cursor, game_id, player_id, team_id, appearance.get("started")
             )
@@ -236,11 +251,7 @@ def save_game_bundle(game_data):
             team_id = home_team_id if side == "home" else away_team_id
             player_id = None
             if entity_type == "player":
-                player = stat["player"]
-                player_id = _find_or_create_named_row(
-                    cursor, "players", player["name"], source,
-                    player.get("source_player_id"), {"country": player.get("country")},
-                )
+                player_id = get_player_id(stat["player"])
                 # Player stats imply participation. The explicit appearances
                 # list is still useful when a played player's stats are absent.
                 _save_appearance(cursor, game_id, player_id, team_id)

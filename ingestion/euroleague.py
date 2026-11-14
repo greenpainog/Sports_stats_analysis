@@ -26,6 +26,29 @@ SECONDS_BETWEEN_REQUESTS = 1.0
 
 COMPETITION_NAMES = {"E": "EuroLeague", "U": "EuroCup"}
 
+# Nicknames people use that the source does not provide, by Euroleague club
+# code. The source's own short names and codes are added automatically.
+TEAM_NICKNAMES = {
+    "ASV": ["Asvel", "Villeurbanne", "Lyon-Villeurbanne"],
+    "BAR": ["Barca", "Barça", "Barcelona"],
+    "BAS": ["Vitoria", "Saski Baskonia"],
+    "BER": ["Alba Berlin"],
+    "IST": ["Efes", "Anadolu Efes"],
+    "MAD": ["R. Madrid", "Real Madrid"],
+    "MCO": ["Monaco"],
+    "MIL": ["Olimpia Milano", "Olimpia Milan", "Armani Milan", "Milano", "EA7 Milan"],
+    "MUN": ["Bayern Munich", "Bayern Munchen", "Bayern München"],
+    "OLY": ["Olympiakos", "Olympiacos"],
+    "PAN": ["Pana", "Panathinaikos Athens"],
+    "PAR": ["Partizan Belgrade", "KK Partizan"],
+    "PRS": ["Paris"],
+    "RED": ["Red Star", "Red Star Belgrade", "Zvezda", "Crvena Zvezda Belgrade", "KK Crvena Zvezda"],
+    "TEL": ["Maccabi Tel Aviv"],
+    "ULK": ["Fener", "Fenerbahçe", "Fenerbahce Istanbul"],
+    "VIR": ["Virtus Bologna"],
+    "ZAL": ["Žalgiris", "Zalgiris Kaunas"],
+}
+
 # Season list phaseType.code -> games.phase
 PHASES = {
     "RS": "regular_season",
@@ -100,14 +123,20 @@ def _clean(value):
     return value.strip() if isinstance(value, str) else value
 
 
-def player_display_name(source_name):
-    """'NUNN, KENDRICK' -> 'Kendrick Nunn'.
+_SUFFIX_DISPLAY = {"JR": "Jr.", "SR": "Sr.", "II": "II", "III": "III", "IV": "IV"}
 
-    Title-casing loses some capitals (McDowell becomes Mcdowell); the alias
-    tables in a later phase will handle spelling differences.
+
+def player_display_name(source_name):
+    """'NUNN, KENDRICK' -> 'Kendrick Nunn'; 'WALKER IV, LONNIE' -> 'Lonnie Walker IV'.
+
+    Title-casing loses some capitals (McDowell becomes Mcdowell); matching is
+    case-insensitive, so this only affects how names are displayed.
     """
     last, _, first = _clean(source_name).partition(",")
-    return f"{first.strip()} {last.strip()}".strip().title()
+    words = f"{first.strip()} {last.strip()}".split()
+    return " ".join(
+        _SUFFIX_DISPLAY.get(word.upper().rstrip("."), word.title()) for word in words
+    )
 
 
 def minutes_to_float(text):
@@ -133,6 +162,19 @@ def utc_start_time(schedule_game):
     """
     moment = datetime.fromisoformat(schedule_game["utcDate"].replace("Z", "+00:00"))
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _team(club, header_name):
+    """Team dict for save_game_bundle, with every name the sources use as aliases."""
+    aliases = [
+        club.get("abbreviatedName"), club.get("editorialName"), club["code"],
+        club.get("tvCode"), _clean(header_name), *TEAM_NICKNAMES.get(club["code"], []),
+    ]
+    return {
+        "name": club["name"],
+        "source_team_id": club["code"],
+        "aliases": [alias for alias in aliases if alias],
+    }
 
 
 def _phase(schedule_game, label):
@@ -206,6 +248,7 @@ def build_game_bundle(header, boxscore, schedule_game, competition, season, game
             player = {
                 "name": player_display_name(row["Player"]),
                 "source_player_id": _clean(row["Player_ID"]),
+                "aliases": [_clean(row["Player"])],  # 'NUNN, KENDRICK'
             }
             appearances.append(
                 {"team": side, "player": player, "started": int(bool(row.get("IsStarter")))}
@@ -236,8 +279,8 @@ def build_game_bundle(header, boxscore, schedule_game, competition, season, game
             "gender": "men",
         },
         "season": {"name": season_name(season)},
-        "home_team": {"name": home_club["name"], "source_team_id": codes[0]},
-        "away_team": {"name": away_club["name"], "source_team_id": codes[1]},
+        "home_team": _team(home_club, header["TeamA"]),
+        "away_team": _team(away_club, header["TeamB"]),
         "start_time": utc_start_time(schedule_game),
         "round_number": schedule_game.get("round"),
         "phase": phase,

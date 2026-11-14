@@ -192,6 +192,26 @@ def create_tables():
 
         _add_missing_columns(cursor, "games", GAMES_ADDED_COLUMNS)
 
+        # Every known name for a team or player, for resolving user questions.
+        # `normalized` is lowercase without accents or punctuation (see
+        # database/aliases.py). One alias may belong to several entities,
+        # e.g. the surname "Hernangomez"; the resolver reports that as ambiguous.
+        for kind in ("team", "player"):
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {kind}_aliases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    {kind}_id INTEGER NOT NULL,
+                    alias TEXT NOT NULL,
+                    normalized TEXT NOT NULL,
+                    FOREIGN KEY ({kind}_id) REFERENCES {kind}s(id) ON DELETE CASCADE,
+                    UNIQUE({kind}_id, normalized)
+                )
+            """)
+            cursor.execute(
+                f"CREATE INDEX IF NOT EXISTS ix_{kind}_aliases_normalized "
+                f"ON {kind}_aliases(normalized)"
+            )
+
         cursor.execute("CREATE INDEX IF NOT EXISTS ix_games_start_time ON games(start_time)")
         cursor.execute("CREATE INDEX IF NOT EXISTS ix_games_season_time ON games(season_id, start_time)")
         cursor.execute("CREATE INDEX IF NOT EXISTS ix_game_stats_name ON game_stats(stat_name)")
