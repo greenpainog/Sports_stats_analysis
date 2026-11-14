@@ -26,6 +26,12 @@ python ask.py "Olympiacos turnovers vs Panathinaikos last 5"
 python ask.py "Olympiacos assists vs Panathinaikos" --source db
 python analysis_runner.py "Total rebounds" --team-a Olympiacos --team-b Panathinaikos --last-n 5
 python analysis_runner.py --list-stats
+
+# Load one Euroleague game (season = start year). Responses are cached in data/raw/.
+python -m ingestion.euroleague --season 2024 --game 1
+
+# Run the tests
+python -m unittest discover -s tests -t .
 ```
 
 ## Layout
