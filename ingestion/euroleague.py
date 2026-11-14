@@ -26,6 +26,14 @@ SECONDS_BETWEEN_REQUESTS = 1.0
 
 COMPETITION_NAMES = {"E": "EuroLeague", "U": "EuroCup"}
 
+# Season list phaseType.code -> games.phase
+PHASES = {
+    "RS": "regular_season",
+    "PI": "play_in",
+    "PO": "playoffs",
+    "FF": "final_four",
+}
+
 # Source column -> our stat_name. Makes and attempts stay separate so that
 # percentages can be computed correctly at query time.
 STAT_COLUMNS = {
@@ -127,6 +135,25 @@ def utc_start_time(schedule_game):
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _phase(schedule_game, label):
+    code = schedule_game["phaseType"]["code"]
+    if code not in PHASES:
+        # Fail loudly so a new phase (e.g. a format change) gets a proper name.
+        raise ValueError(f"Unknown phase code {code!r} for {label}.")
+    return PHASES[code]
+
+
+def _is_neutral_venue(schedule_game, phase):
+    """True when neither team plays at home.
+
+    The source flag is unreliable for the Final Four: in 2024-25 the
+    semifinals in Abu Dhabi are flagged neutral but the Final and third-place
+    game at the same arena are not. The Final Four is always held at one
+    pre-chosen venue, so every Final Four game counts as neutral.
+    """
+    return bool(schedule_game.get("isNeutralVenue")) or phase == "final_four"
+
+
 def _stat_items(row, entity_type, side, player=None):
     items = []
     for column, stat_name in STAT_COLUMNS.items():
@@ -164,6 +191,7 @@ def build_game_bundle(header, boxscore, schedule_game, competition, season, game
     for side_stats, code in zip(team_stats, codes):
         if _clean(side_stats["PlayersStats"][0]["Team"]) != code:
             raise ValueError(f"Box score team order does not match the season list for {label}.")
+    phase = _phase(schedule_game, label)
     if (int(header["ScoreA"]), int(header["ScoreB"])) != (
         schedule_game["local"]["score"], schedule_game["road"]["score"]
     ):
@@ -211,6 +239,9 @@ def build_game_bundle(header, boxscore, schedule_game, competition, season, game
         "home_team": {"name": home_club["name"], "source_team_id": codes[0]},
         "away_team": {"name": away_club["name"], "source_team_id": codes[1]},
         "start_time": utc_start_time(schedule_game),
+        "round_number": schedule_game.get("round"),
+        "phase": phase,
+        "is_neutral_venue": _is_neutral_venue(schedule_game, phase),
         "status": "live" if header.get("Live") else "finished",
         "home_score": int(header["ScoreA"]),
         "away_score": int(header["ScoreB"]),

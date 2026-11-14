@@ -15,6 +15,7 @@ import database.db as db
 from database.repositories import save_game_bundle
 from database.schema import create_tables
 from ingestion.euroleague import (
+    _is_neutral_venue,
     build_game_bundle,
     minutes_to_float,
     player_display_name,
@@ -36,6 +37,46 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(minutes_to_float("16:18"), 16.3)
         self.assertIsNone(minutes_to_float("DNP"))
         self.assertIsNone(minutes_to_float(None))
+
+
+class SchemaMigrationTests(unittest.TestCase):
+    def test_old_games_table_gets_new_columns_and_keeps_rows(self):
+        original = db.DATABASE_FILE
+        with tempfile.TemporaryDirectory() as tmp:
+            db.DATABASE_FILE = str(Path(tmp) / "old.db")
+            try:
+                conn = sqlite3.connect(db.DATABASE_FILE)
+                conn.execute("""CREATE TABLE games (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, season_id INTEGER NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'flashscore', source_game_id TEXT,
+                    source_url TEXT, start_time TEXT NOT NULL, status TEXT,
+                    home_team_id INTEGER NOT NULL, away_team_id INTEGER NOT NULL,
+                    home_score INTEGER, away_score INTEGER)""")
+                conn.execute("""INSERT INTO games (season_id, start_time, home_team_id, away_team_id)
+                                VALUES (1, '2024-10-03T16:45:00Z', 1, 2)""")
+                conn.commit()
+                conn.close()
+
+                create_tables()
+                create_tables()  # running twice must be harmless
+
+                conn = sqlite3.connect(db.DATABASE_FILE)
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(games)")}
+                rows = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+                conn.close()
+            finally:
+                db.DATABASE_FILE = original
+
+        self.assertTrue({"round_number", "phase", "is_neutral_venue"} <= columns)
+        self.assertEqual(rows, 1)
+
+
+class NeutralVenueTests(unittest.TestCase):
+    def test_final_four_is_neutral_even_when_source_flag_is_false(self):
+        # The 2024-25 Final in Abu Dhabi has isNeutralVenue = False in the source.
+        self.assertTrue(_is_neutral_venue({"isNeutralVenue": False}, "final_four"))
+        self.assertTrue(_is_neutral_venue({"isNeutralVenue": True}, "final_four"))
+        self.assertFalse(_is_neutral_venue({"isNeutralVenue": False}, "playoffs"))
 
 
 class StartTimeTests(unittest.TestCase):
@@ -81,6 +122,9 @@ class OneGameTests(unittest.TestCase):
         # Header said 18:45 (Berlin, UTC+2); stored as UTC.
         self.assertEqual(b["start_time"], "2024-10-03T16:45:00Z")
         self.assertEqual(b["home_team"]["name"], "ALBA Berlin")
+        self.assertEqual(b["round_number"], 1)
+        self.assertEqual(b["phase"], "regular_season")
+        self.assertFalse(b["is_neutral_venue"])
         self.assertEqual(b["season"]["name"], "2024-25")
 
     def test_dnp_players_are_left_out(self):
@@ -132,11 +176,15 @@ class OneGameTests(unittest.TestCase):
                            WHERE gs.entity_type = 'team' AND gs.stat_name = 'points'
                              AND t.source_team_id = 'BER'"""
                     ).fetchone()[0]
+                    saved_game = conn.execute(
+                        "SELECT round_number, phase, is_neutral_venue FROM games"
+                    ).fetchone()
                 finally:
                     conn.close()
             finally:
                 db.DATABASE_FILE = original
 
+        self.assertEqual(saved_game, (1, "regular_season", 0))
         self.assertEqual(counts["games"], 1)
         self.assertEqual(counts["teams"], 2)
         self.assertEqual(counts["players"], 21)

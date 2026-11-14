@@ -178,33 +178,37 @@ def save_game_bundle(game_data):
             )
 
         row = cursor.fetchone()
-        game_values = (
-            season_id,
-            game_data.get("source_url"),
-            game_data["start_time"],
-            game_data.get("status"),
-            home_team_id,
-            away_team_id,
-            game_data.get("home_score"),
-            game_data.get("away_score"),
-        )
+        neutral = game_data.get("is_neutral_venue")
+        game_columns = {
+            "season_id": season_id,
+            "source_url": game_data.get("source_url"),
+            "start_time": game_data["start_time"],
+            "status": game_data.get("status"),
+            "home_team_id": home_team_id,
+            "away_team_id": away_team_id,
+            "home_score": game_data.get("home_score"),
+            "away_score": game_data.get("away_score"),
+            "round_number": game_data.get("round_number"),
+            "phase": game_data.get("phase"),
+            "is_neutral_venue": None if neutral is None else int(bool(neutral)),
+        }
         if row:
             game_id = row[0]
+            assignments = ", ".join(f"{column} = ?" for column in game_columns)
             cursor.execute(
-                """UPDATE games SET season_id = ?, source_url = ?, start_time = ?,
-                   status = ?, home_team_id = ?, away_team_id = ?, home_score = ?,
-                   away_score = ? WHERE id = ?""",
-                (*game_values, game_id),
+                f"UPDATE games SET {assignments} WHERE id = ?",
+                (*game_columns.values(), game_id),
             )
         else:
+            insert_columns = {
+                "source": source,
+                "source_game_id": str(source_game_id) if source_game_id is not None else None,
+                **game_columns,
+            }
+            placeholders = ", ".join("?" for _ in insert_columns)
             cursor.execute(
-                """INSERT INTO games
-                   (season_id, source, source_game_id, source_url, start_time,
-                    status, home_team_id, away_team_id, home_score, away_score)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (season_id, source,
-                 str(source_game_id) if source_game_id is not None else None,
-                 *game_values[1:]),
+                f"INSERT INTO games ({', '.join(insert_columns)}) VALUES ({placeholders})",
+                tuple(insert_columns.values()),
             )
             game_id = cursor.lastrowid
 

@@ -7,6 +7,24 @@ use the competition-aware tables below.
 
 from database.db import get_connection
 
+# Columns added to `games` after the table was first created. CREATE TABLE IF
+# NOT EXISTS never changes an existing table, so older databases get these
+# through ALTER TABLE in create_tables().
+#   phase: 'regular_season', 'play_in', 'playoffs' or 'final_four'
+#   is_neutral_venue: 1 when neither team is at home (e.g. Final Four)
+GAMES_ADDED_COLUMNS = {
+    "round_number": "INTEGER",
+    "phase": "TEXT",
+    "is_neutral_venue": "INTEGER",
+}
+
+
+def _add_missing_columns(cursor, table, columns):
+    existing = {row[1] for row in cursor.execute(f"PRAGMA table_info({table})")}
+    for name, column_type in columns.items():
+        if name not in existing:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")
+
 
 def create_tables():
     """Create the database tables without deleting existing data."""
@@ -105,6 +123,9 @@ def create_tables():
                 away_team_id INTEGER NOT NULL,
                 home_score INTEGER,
                 away_score INTEGER,
+                round_number INTEGER,
+                phase TEXT,
+                is_neutral_venue INTEGER,
                 FOREIGN KEY (season_id) REFERENCES seasons(id),
                 FOREIGN KEY (home_team_id) REFERENCES teams(id),
                 FOREIGN KEY (away_team_id) REFERENCES teams(id),
@@ -168,6 +189,8 @@ def create_tables():
             ON game_stats(game_id, player_id, stat_name, period)
             WHERE entity_type = 'player'
         """)
+
+        _add_missing_columns(cursor, "games", GAMES_ADDED_COLUMNS)
 
         cursor.execute("CREATE INDEX IF NOT EXISTS ix_games_start_time ON games(start_time)")
         cursor.execute("CREATE INDEX IF NOT EXISTS ix_games_season_time ON games(season_id, start_time)")
