@@ -4,7 +4,6 @@ Run locally from the project root:
     uvicorn api.main:app --reload
 then open http://127.0.0.1:8000/docs for interactive documentation.
 """
-from dataclasses import asdict
 from typing import Literal
 
 from functools import lru_cache
@@ -17,8 +16,8 @@ from analysis.stat_query import (
     PERCENTAGE_STATS,
     RESULT_STATS,
     QueryError,
-    query_stats,
 )
+from api.service import answer_spec
 from api.models import (
     AskRequest,
     AskResponse,
@@ -80,20 +79,8 @@ def resolve(kind: Literal["team", "player"], name: str = Query(min_length=1)):
     responses={400: {"model": ErrorResponse, "description": "Unknown or ambiguous name"}},
 )
 def run_query(spec: QuerySpec):
-    """Answer one QuerySpec: the matching games plus a summary per stat."""
-    return _answer(spec)
-
-
-def _answer(spec: QuerySpec) -> QueryResponse:
-    result = query_stats(**spec.model_dump())
-    return QueryResponse(
-        subject=result.subject,
-        subject_type=result.subject_type,
-        filters=result.filters,
-        games=[asdict(game) for game in result.games],
-        summary={stat: asdict(summary) for stat, summary in result.summary.items()},
-        answer=result.describe(),
-    )
+    """Answer one QuerySpec: the matching games plus a summary per stat (and per side, with compare)."""
+    return answer_spec(spec)
 
 
 @lru_cache
@@ -119,7 +106,7 @@ def ask(request: AskRequest, llm=Depends(get_llm)):
         return AskResponse(question=question, status=parsed.status, message=parsed.reason)
 
     try:
-        result = _answer(parsed.spec)
+        result = answer_spec(parsed.spec)
     except QueryError as exc:
         return AskResponse(
             question=question, status="needs_clarification", message=str(exc), spec=parsed.spec,

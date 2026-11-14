@@ -18,12 +18,12 @@ import json
 import sys
 import time
 from collections import defaultdict
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from analysis.stat_query import QueryError, query_stats
+from analysis.stat_query import QueryError
 from api.models import QuerySpec
+from api.service import answer_spec
 from database.aliases import resolve_player, resolve_team
 
 EVAL_DIR = Path(__file__).resolve().parent
@@ -38,24 +38,43 @@ def load_questions(path=QUESTIONS_FILE):
         return [json.loads(line) for line in f if line.strip()]
 
 
-def run_spec(spec: QuerySpec):
-    """The parts of a query result that decide whether two specs agree."""
-    result = query_stats(**spec.model_dump())
+def _fingerprint(response):
     return {
-        "subject": result.subject,
-        "games": [game.game_id for game in result.games],
-        "summary": {stat: asdict(s) for stat, s in result.summary.items()},
+        "subject": response.subject,
+        "games": [game.game_id for game in response.games],
+        "summary": {stat: s.model_dump() for stat, s in response.summary.items()},
     }
 
 
-def normalized(spec: QuerySpec):
-    """The spec with names replaced by database ids and stats as a set."""
-    data = spec.model_dump()
+def run_spec(spec: QuerySpec):
+    """The parts of a query result that decide whether two specs agree.
+
+    Compare sides are matched by their results, so their order and labels don't matter.
+    """
+    response = answer_spec(spec)
+    result = _fingerprint(response)
+    result["sides"] = sorted(
+        (json.dumps(_fingerprint(side.result), sort_keys=True) for side in response.comparison or []),
+    )
+    return result
+
+
+def _resolve_names(data):
     for name, resolve in NAME_FIELDS.items():
-        if data[name] is not None:
+        if data.get(name) is not None:
             match = resolve(data[name])
             data[name] = match.id if match.status == "match" else data[name]
+    return data
+
+
+def normalized(spec: QuerySpec):
+    """The spec with names replaced by database ids, stats as a set, and sides unordered and unlabelled."""
+    data = _resolve_names(spec.model_dump(exclude={"compare"}))
     data["stats"] = sorted(data["stats"])
+    data["sides"] = sorted(
+        json.dumps(_resolve_names(side.model_dump(exclude={"label"}, exclude_defaults=True)), sort_keys=True)
+        for side in spec.compare or []
+    )
     return data
 
 
@@ -77,7 +96,7 @@ def score(item, parsed):
     expected = run_spec(gold_spec)
     if got == expected:
         return True, exact, ""
-    diffs = [part for part in ("subject", "games", "summary") if got[part] != expected[part]]
+    diffs = [part for part in ("subject", "games", "summary", "sides") if got[part] != expected[part]]
     return False, exact, "different " + ", ".join(diffs)
 
 

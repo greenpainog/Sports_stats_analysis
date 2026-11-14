@@ -10,8 +10,8 @@ from tests.test_stat_query import build_test_league
 
 def test_eval_set_is_well_formed():
     questions = load_questions()
-    assert len(questions) == 50
-    assert len({q["id"] for q in questions}) == 50
+    assert len(questions) >= 50
+    assert len({q["id"] for q in questions}) == len(questions)
     for q in questions:
         if q["gold"] is not None:
             QuerySpec(**q["gold"])  # raises if a gold spec is invalid
@@ -58,3 +58,16 @@ def test_unanswerable_scoring():
     assert score({"gold": None}, ParseResult(status="unanswerable", reason="NBA"))[0]
     assert not score({"gold": None}, ok(stats=["points"], player="Shooter"))[0]
     assert not score(GOLD, ParseResult(status="unanswerable", reason="?"))[0]
+
+
+def test_compare_sides_are_scored_by_result_not_order_or_label(league):
+    gold = {"gold": {"stats": ["total_rebounds"], "team": "Alpha", "compare": [
+        {"label": "without", "without_player": "Sid Kick"}, {"label": "with", "with_player": "Sid Kick"}]}}
+    swapped = ok(stats=["total_rebounds"], team="Alpha", compare=[
+        {"label": "Kick plays", "with_player": "S. Kick"},
+        {"label": "Kick out", "without_player": "Sid Kick"}])
+    assert score(gold, swapped)[:2] == (True, True)
+    one_side_wrong = ok(stats=["total_rebounds"], team="Alpha", compare=[
+        {"without_player": "Sid Kick"}, {"venue": "home"}])
+    correct, _, note = score(gold, one_side_wrong)
+    assert not correct and "sides" in note

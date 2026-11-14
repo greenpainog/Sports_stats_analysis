@@ -61,7 +61,20 @@ Evaluate the parser on 50 questions with hand-written gold specs:
 ```powershell
 python -m eval.run_eval --check-gold   # no LLM: every gold spec is valid and runs
 python -m eval.run_eval                # accuracy overall and per category, plus failures
+python -m eval.run_eval --file eval/heldout_questions.jsonl   # questions written separately from the prompt
 ```
+
+To compare conditions for the same subject, add `compare` with 2-4 sides. Shared filters stay
+at the top level, and each side lists only what differs:
+
+```json
+{"stats": ["turnovers"], "team": "Panathinaikos", "season": "2026-27",
+ "compare": [{"label": "without Nunn", "without_player": "Nunn"},
+             {"label": "with Nunn", "with_player": "Nunn"}]}
+```
+
+The response has the result for the shared filters plus `comparison`, one result per side.
+`/ask` builds these from questions like "Panathinaikos turnovers when Nunn is out vs playing".
 
 The database path defaults to `data/sports_analytics.db` in the project folder;
 set the `SPORTS_DB_PATH` environment variable to use another file.
@@ -104,6 +117,6 @@ least one second apart. Data files, API keys and `.env` are never committed.
 2. Team/player alias tables and name resolution ✅ `database.aliases.resolve_team()` / `resolve_player()`
 3. Query layer (opponent, home/away, last N, opponent over .500, player absent) ✅ `analysis.stat_query.query_stats()`
 4. FastAPI + Pydantic `QuerySpec` API ✅ `api/` (`POST /query`, `GET /resolve/{kind}`, `GET /stats`)
-5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 50/50 with gpt-6-luna on 2026-11-14 (3 runs)
+5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 56/56 and 12/12 held-out with gpt-6-luna on 2026-11-15
 6. Greek league ingestion
 7. Docker, demo, agent for multi-step questions, Azure deployment

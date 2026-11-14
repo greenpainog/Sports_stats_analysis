@@ -20,7 +20,7 @@ from typing import Callable, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
-from api.models import QuerySpec
+from api.models import CompareSide, QuerySpec
 from database.db import get_connection
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -30,10 +30,13 @@ DEFAULT_MODEL = "gpt-6-luna"
 # plus `answerable` and `reason`. Nothing has a default, because strict
 # Structured Outputs requires every field to be present. Range checks
 # (last_n >= 1, season format, ...) are left to QuerySpec afterwards.
-_SPEC_FIELDS = {
-    name: (info.annotation, Field(description=info.description))
-    for name, info in QuerySpec.model_fields.items()
-}
+def _llm_fields(model):
+    return {name: (info.annotation, Field(description=info.description)) for name, info in model.model_fields.items()}
+
+
+LLMCompareSide = create_model("LLMCompareSide", __config__=ConfigDict(extra="forbid"), **_llm_fields(CompareSide))
+_SPEC_FIELDS = _llm_fields(QuerySpec)
+_SPEC_FIELDS["compare"] = (Optional[list[LLMCompareSide]], Field(description=QuerySpec.model_fields["compare"].description))
 LLMQuerySpec = create_model(
     "LLMQuerySpec",
     __config__=ConfigDict(extra="forbid"),
@@ -88,11 +91,16 @@ How to fill the spec:
 - "playoffs" -> phase "playoffs"; "Final Four" -> "final_four"; "regular season" -> "regular_season"; "play-in" -> "play_in".
 - Stats: rebounds -> total_rebounds; "3-point %"/"three-point shooting" -> fg3_pct; "threes"/"3s made" -> fg3_made; "free throw %" -> ft_pct; "field goal %" or plain "shooting" -> fg_pct; "2-point %" -> fg2_pct; PIR/efficiency/index rating -> pir; fouls -> fouls_committed; "fouls drawn" -> fouls_received; "record"/"win percentage"/"how many wins"/"how did they do" -> win_pct. If no stat is named ("how did he play", "his stats") -> points, total_rebounds, assists.
 - Leave every filter that the question does not mention at null (or false for opponent_over_500).
+- compare is null unless the question compares conditions for the same subject ("X vs Y", "when ... and when ...", "more or less"). Then put what both sides share (subject, stats, season, ...) at the top level and give each side a short label and only the filters that differ. Examples:
+  "Punter points with and without Satoransky this season" -> player "Punter", season "{current}", compare [{{label "with Satoransky", with_player "Satoransky"}}, {{label "without Satoransky", without_player "Satoransky"}}].
+  "Olympiacos record home vs away" -> compare [{{label "home", venue "home"}}, {{label "away", venue "away"}}].
+  "Real turnovers on short rest vs rested" -> compare [{{label "short rest", max_rest_hours 48}}, {{label "rested", min_rest_hours 72}}].
+  "Nunn points this season vs last season" -> compare [{{label "{current}", season "{current}"}}, {{label "{previous}", season "{previous}"}}].
 
 Set answerable false, fill reason with one short sentence, and leave the other fields empty/null/false when the question:
 - is about another competition (NBA, EuroCup, Greek league, ACB, national teams, ...);
 - needs data we do not have (shot locations, salaries, height, dunks, injuries, transfers, coaches, attendance, ...);
-- compares or ranks several subjects ("who scored the most", "league leaders", "Nunn or Larkin") — only one subject per question;
+- compares or ranks several different players or teams ("who scored the most", "league leaders", "Nunn or Larkin") — one subject per question (comparing conditions for one subject is fine, see compare);
 - asks for a prediction or opinion, or is not a basketball stats question at all.
 The reason must only say what the query can't express (e.g. "A query can't filter by the team a player was on."). You cannot see the database, so never claim facts about players, teams, transfers or results."""
 

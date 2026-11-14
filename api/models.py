@@ -17,20 +17,11 @@ Venue = Literal["home", "away", "neutral"]
 Phase = Literal["regular_season", "play_in", "playoffs", "final_four"]
 
 
-class QuerySpec(BaseModel):
-    """A stat question about exactly one player or one team."""
+class Filters(BaseModel):
+    """Which games count. Shared by QuerySpec and each side of a comparison."""
 
     model_config = ConfigDict(extra="forbid")  # unknown fields are an error, not ignored
 
-    stats: list[StatName] = Field(
-        min_length=1, max_length=8,
-        description=(
-            "Stats to report. Percentages (fg3_pct, ...) are computed from makes and attempts; "
-            "win_pct is the win-loss record of the subject's team in the matching games."
-        ),
-    )
-    player: Optional[str] = Field(None, description="Player name, e.g. 'Kendrick Nunn' or 'Nunn'.")
-    team: Optional[str] = Field(None, description="Team name, e.g. 'Panathinaikos' or 'Real'.")
     opponent: Optional[str] = Field(None, description="Only games against this team.")
     venue: Optional[Venue] = Field(None, description="From the subject's point of view.")
     last_n: Optional[int] = Field(None, ge=1, le=100, description="Most recent N games after other filters.")
@@ -58,6 +49,40 @@ class QuerySpec(BaseModel):
         description="Only games played at least this many hours after the team's previous game.",
     )
 
+
+FILTER_FIELDS = tuple(Filters.model_fields)
+
+
+class CompareSide(Filters):
+    """One side of a comparison: only the filters that differ between the sides."""
+
+    label: Optional[str] = Field(None, max_length=60, description="Short name for this side, e.g. 'without Nunn'.")
+
+
+class QuerySpec(Filters):
+    """A stat question about exactly one player or one team.
+
+    With `compare`, the same question is answered for each side: the side's
+    filters are added to the shared ones, e.g. 'with Nunn' vs 'without Nunn'.
+    """
+
+    stats: list[StatName] = Field(
+        min_length=1, max_length=8,
+        description=(
+            "Stats to report. Percentages (fg3_pct, ...) are computed from makes and attempts; "
+            "win_pct is the win-loss record of the subject's team in the matching games."
+        ),
+    )
+    player: Optional[str] = Field(None, description="Player name, e.g. 'Kendrick Nunn' or 'Nunn'.")
+    team: Optional[str] = Field(None, description="Team name, e.g. 'Panathinaikos' or 'Real'.")
+    compare: Optional[list[CompareSide]] = Field(
+        None, min_length=2, max_length=4,
+        description=(
+            "Only for questions comparing conditions for the same subject ('with X vs without X', "
+            "'home vs away'). Each side lists only the filters that differ; shared filters stay above."
+        ),
+    )
+
     @model_validator(mode="after")
     def check_combinations(self):
         if (self.player is None) == (self.team is None):
@@ -67,7 +92,30 @@ class QuerySpec(BaseModel):
         if (self.min_rest_hours is not None and self.max_rest_hours is not None
                 and self.min_rest_hours > self.max_rest_hours):
             raise ValueError("min_rest_hours cannot be more than max_rest_hours.")
+        if self.compare:
+            self.side_specs()  # raises if a side is empty, repeated or invalid once merged
         return self
+
+    def side_specs(self):
+        """[(label, QuerySpec), ...]: one plain spec per side, shared filters plus the side's own."""
+        base = self.model_dump(exclude={"compare"})
+        sides, seen = [], set()
+        for side in self.compare or []:
+            own = side.model_dump(exclude={"label"}, exclude_defaults=True)
+            if not own:
+                raise ValueError("Each compare side needs at least one filter.")
+            key = tuple(sorted(own.items()))
+            if key in seen:
+                raise ValueError("Two compare sides have the same filters.")
+            seen.add(key)
+            label = side.label or ", ".join(f"{k}={v}" for k, v in own.items())
+            try:
+                sides.append((label, QuerySpec(**{**base, **own})))
+            except ValueError as exc:
+                raise ValueError(f"Compare side '{label}' is invalid: {exc}") from exc
+        if len({label for label, _ in sides}) != len(sides):
+            raise ValueError("Compare sides need different labels.")
+        return sides
 
 
 class GameRow(BaseModel):
@@ -101,6 +149,14 @@ class QueryResponse(BaseModel):
     games: list[GameRow]
     summary: dict[str, StatSummary]
     answer: str = Field(description="Readable summary of the result.")
+    comparison: Optional[list["ComparisonSide"]] = Field(
+        None, description="With QuerySpec.compare: the result for each side. The fields above cover all sides' shared filters."
+    )
+
+
+class ComparisonSide(BaseModel):
+    label: str
+    result: QueryResponse
 
 
 class Candidate(BaseModel):
@@ -139,3 +195,6 @@ class AskResponse(BaseModel):
     spec: Optional[QuerySpec] = Field(None, description="The structured query the question was turned into.")
     result: Optional[QueryResponse] = None
     candidates: list[Candidate] = []
+
+
+QueryResponse.model_rebuild()  # resolve the forward reference to ComparisonSide

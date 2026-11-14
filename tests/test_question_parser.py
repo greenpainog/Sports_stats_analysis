@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 import database.db as db
 from api.main import app, get_llm
 from api.models import QuerySpec
-from llm.question_parser import LLMQuerySpec, build_instructions, parse_question
+from llm.question_parser import LLMCompareSide, LLMQuerySpec, build_instructions, parse_question
 from tests.test_stat_query import build_test_league
 
 
@@ -17,6 +17,14 @@ def llm_output(**fields):
     base.update(answerable=True, stats=[], opponent_over_500=False)
     base.update(fields)
     return LLMQuerySpec(**base)
+
+
+def side(**fields):
+    """An LLMCompareSide with every filter empty except the ones given."""
+    base = {name: None for name in LLMCompareSide.model_fields}
+    base.update(opponent_over_500=False)
+    base.update(fields)
+    return LLMCompareSide(**base)
 
 
 class FakeLLM:
@@ -46,6 +54,8 @@ def parse(question, *outputs):
 
 def test_llm_schema_has_every_queryspec_field():
     assert set(LLMQuerySpec.model_fields) == set(QuerySpec.model_fields) | {"answerable", "reason"}
+    from api.models import CompareSide
+    assert set(LLMCompareSide.model_fields) == set(CompareSide.model_fields)
 
 
 def test_instructions_name_the_loaded_and_current_season():
@@ -135,3 +145,25 @@ def test_ask_llm_down_is_503(ask):
 
 def test_ask_rejects_empty_question(ask):
     assert ask("").status_code == 422
+
+
+def test_ask_compare(ask):
+    body = ask("Alpha rebounds with and without Kick", llm_output(
+        stats=["total_rebounds"], team="Alpha",
+        compare=[side(label="without Kick", without_player="Sid Kick"), side(label="with Kick", with_player="Sid Kick")],
+    )).json()
+    assert body["status"] == "answered"
+    assert [s["label"] for s in body["result"]["comparison"]] == ["without Kick", "with Kick"]
+    assert body["spec"]["compare"][0] == {**{k: None for k in LLMCompareSide.model_fields},
+                                          "opponent_over_500": False, "label": "without Kick",
+                                          "without_player": "Sid Kick"}
+
+
+def test_empty_compare_side_is_retried():
+    result, _ = parse(
+        "Nunn home vs away",
+        llm_output(stats=["points"], player="Nunn", compare=[side(label="home", venue="home"), side(label="away")]),
+        llm_output(stats=["points"], player="Nunn", compare=[side(label="home", venue="home"), side(label="away", venue="away")]),
+    )
+    assert result.status == "ok" and result.attempts == 2
+    assert [label for label, _ in result.spec.side_specs()] == ["home", "away"]

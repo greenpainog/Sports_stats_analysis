@@ -42,6 +42,12 @@ def test_queryspec_accepts_a_valid_question():
     {"stats": ["assists"], "player": "Nunn", "sql": "DROP TABLE"},  # unknown field
     {"stats": ["assists"], "player": "Nunn", "max_rest_hours": -5},  # negative rest
     {"stats": ["assists"], "player": "Nunn", "min_rest_hours": 72, "max_rest_hours": 48},
+    {"stats": ["assists"], "player": "Nunn", "compare": [{"venue": "home"}]},                    # one side
+    {"stats": ["assists"], "player": "Nunn", "compare": [{"label": "a"}, {"venue": "home"}]},   # empty side
+    {"stats": ["assists"], "player": "Nunn", "compare": [{"venue": "home"}, {"venue": "home"}]},  # same twice
+    {"stats": ["assists"], "player": "Nunn", "compare": [{"player": "X"}, {"venue": "home"}]},  # subject in a side
+    {"stats": ["assists"], "player": "Nunn", "max_rest_hours": 48,
+     "compare": [{"min_rest_hours": 72}, {"venue": "home"}]},                                   # invalid once merged
 ])
 def test_queryspec_rejects_invalid_questions(bad):
     with pytest.raises(ValidationError):
@@ -130,3 +136,35 @@ def test_resolve_by_first_name_as_last_resort(client):
     assert (body["status"], body["method"], body["candidates"][0]["name"]) == ("match", "first_name", "Sam Shooter")
     # A surname still wins over a first name.
     assert client.get("/resolve/player", params={"name": "Shooter"}).json()["method"] == "exact"
+
+
+def test_compare_with_and_without_a_player(client):
+    body = client.post("/query", json={
+        "stats": ["total_rebounds", "win_pct"], "team": "Alpha",
+        "compare": [{"label": "without Kick", "without_player": "Sid Kick"},
+                    {"label": "with Kick", "with_player": "Sid Kick"}],
+    }).json()
+    without, with_ = body["comparison"]
+    assert (without["label"], with_["label"]) == ("without Kick", "with Kick")
+    without_ids = [g["game_id"] for g in without["result"]["games"]]
+    with_ids = [g["game_id"] for g in with_["result"]["games"]]
+    assert without_ids == [4]
+    assert not set(without_ids) & set(with_ids)
+    assert set(without_ids) | set(with_ids) <= {g["game_id"] for g in body["games"]}
+    assert "without Kick" in body["answer"] and "with Kick" in body["answer"]
+
+
+def test_compare_home_and_away_splits_all_games(client):
+    body = client.post("/query", json={
+        "stats": ["total_rebounds"], "team": "Alpha",
+        "compare": [{"venue": "home"}, {"venue": "away"}, {"venue": "neutral"}],  # g4 is neutral
+    }).json()
+    sides = [side["result"] for side in body["comparison"]]
+    assert body["comparison"][0]["label"] == "venue=home"  # default label
+    assert sum(len(side["games"]) for side in sides) == len(body["games"])
+    assert (sum(side["summary"]["total_rebounds"]["total"] for side in sides)
+            == body["summary"]["total_rebounds"]["total"])
+
+
+def test_no_compare_means_no_comparison(client):
+    assert client.post("/query", json={"stats": ["total_rebounds"], "team": "Alpha"}).json()["comparison"] is None
