@@ -1,13 +1,13 @@
+"""Legacy Flashscore scraper. Not used any more; kept for reference.
+
+Run from the project root with: python -m legacy.flashscore_main
+"""
 from playwright.sync_api import sync_playwright
-from config import HEADLESS
-from scraper.match_links import get_match_links
-from scraper.match_data import extract_match_data
-from utils.csv_writer import save_to_csv
+from legacy.config import HEADLESS
+from legacy.scraper.match_links import get_match_links
+from legacy.scraper.match_data import extract_match_data
+from legacy.utils.csv_writer import save_to_csv
 from database.repositories import save_match_data
-
-
-
-
 
 
 def run():

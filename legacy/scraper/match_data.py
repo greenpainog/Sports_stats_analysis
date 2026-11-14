@@ -1,7 +1,5 @@
-# scraper/match_data.py
-
-from config import STATS_TO_EXTRACT
-from scraper.stats_extractor import extract_stats
+from legacy.config import STATS_TO_EXTRACT
+from legacy.scraper.stats_extractor import extract_stats
 
 
 
@@ -45,5 +43,3 @@ def extract_match_data(page, link):
         "team2": away,
         "stats": extract_stats(page, STATS_TO_EXTRACT),
     }
-
-    return match_data

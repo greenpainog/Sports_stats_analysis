@@ -1,4 +1,4 @@
-from config import MATCH_LIMIT_PER_TEAM, TEAM_RESULT_URLS
+from legacy.config import MATCH_LIMIT_PER_TEAM, TEAM_RESULT_URLS
 
 
 BASE_URL = "https://www.flashscore.com"
