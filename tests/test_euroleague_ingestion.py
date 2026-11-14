@@ -18,11 +18,13 @@ from ingestion.euroleague import (
     build_game_bundle,
     minutes_to_float,
     player_display_name,
+    utc_start_time,
 )
 
 RAW = Path("data/raw/euroleague")
 HEADER = RAW / "header_E2024_1.json"
 BOXSCORE = RAW / "boxscore_E2024_1.json"
+SEASON_GAMES = RAW / "games_E2024.json"
 
 
 class HelperTests(unittest.TestCase):
@@ -36,13 +38,33 @@ class HelperTests(unittest.TestCase):
         self.assertIsNone(minutes_to_float(None))
 
 
-@unittest.skipUnless(HEADER.exists() and BOXSCORE.exists(), "cached E2024 game 1 not found")
+class StartTimeTests(unittest.TestCase):
+    def test_utc_start_time(self):
+        # Final Four 2025 in Abu Dhabi: 21:00 local (UTC+4) = 17:00 UTC.
+        game = {"utcDate": "2025-05-25T17:00:00Z", "localDate": "2025-05-25T21:00:00"}
+        self.assertEqual(utc_start_time(game), "2025-05-25T17:00:00Z")
+
+
+@unittest.skipUnless(
+    HEADER.exists() and BOXSCORE.exists() and SEASON_GAMES.exists(),
+    "cached E2024 game 1 not found",
+)
 class OneGameTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.header = json.loads(HEADER.read_text(encoding="utf-8"))
         cls.boxscore = json.loads(BOXSCORE.read_text(encoding="utf-8"))
-        cls.bundle = build_game_bundle(cls.header, cls.boxscore, "E", 2024, 1)
+        season_games = json.loads(SEASON_GAMES.read_text(encoding="utf-8"))["data"]
+        cls.schedule_game = next(g for g in season_games if g["gameCode"] == 1)
+        cls.bundle = build_game_bundle(
+            cls.header, cls.boxscore, cls.schedule_game, "E", 2024, 1
+        )
+
+    def test_mismatched_home_team_is_rejected(self):
+        swapped = dict(self.schedule_game, local=self.schedule_game["road"],
+                       road=self.schedule_game["local"])
+        with self.assertRaises(ValueError):
+            build_game_bundle(self.header, self.boxscore, swapped, "E", 2024, 1)
 
     def _stat(self, entity_type, side, stat_name, player_id=None):
         for s in self.bundle["stats"]:
@@ -56,7 +78,9 @@ class OneGameTests(unittest.TestCase):
         self.assertEqual(b["home_team"]["source_team_id"], "BER")
         self.assertEqual(b["away_team"]["source_team_id"], "PAN")
         self.assertEqual((b["home_score"], b["away_score"]), (77, 87))
-        self.assertEqual(b["start_time"], "2024-10-03T18:45")
+        # Header said 18:45 (Berlin, UTC+2); stored as UTC.
+        self.assertEqual(b["start_time"], "2024-10-03T16:45:00Z")
+        self.assertEqual(b["home_team"]["name"], "ALBA Berlin")
         self.assertEqual(b["season"]["name"], "2024-25")
 
     def test_dnp_players_are_left_out(self):

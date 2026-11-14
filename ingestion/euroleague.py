@@ -10,7 +10,7 @@ Run from the project root, for example:
 import argparse
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -19,6 +19,7 @@ from database.repositories import save_game_bundle
 
 SOURCE = "euroleague"
 BASE_URL = "https://live.euroleague.net/api"
+SEASON_GAMES_URL = "https://api-live.euroleague.net/v2/competitions"
 RAW_DIR = Path("data/raw/euroleague")
 SECONDS_BETWEEN_REQUESTS = 1.0
 
@@ -50,28 +51,40 @@ STAT_COLUMNS = {
 _last_request_time = 0.0
 
 
-def _raw_path(kind, competition, season, gamecode):
-    return RAW_DIR / f"{kind.lower()}_{competition}{season}_{gamecode}.json"
-
-
-def fetch_json(kind, competition, season, gamecode):
-    """Return one endpoint's JSON ("Header" or "Boxscore"), downloading only if not cached."""
+def _cached_get(path, url, params=None):
+    """Return JSON from `path`; download it from `url` first only if it is missing."""
     global _last_request_time
-    path = _raw_path(kind, competition, season, gamecode)
     if not path.exists():
         wait = SECONDS_BETWEEN_REQUESTS - (time.monotonic() - _last_request_time)
         if wait > 0:
             time.sleep(wait)
-        response = requests.get(
-            f"{BASE_URL}/{kind}",
-            params={"gamecode": gamecode, "seasoncode": f"{competition}{season}"},
-            timeout=60,
-        )
+        response = requests.get(url, params=params, timeout=60)
         _last_request_time = time.monotonic()
         response.raise_for_status()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(response.text, encoding="utf-8")
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def fetch_json(kind, competition, season, gamecode):
+    """Return one game's "Header" or "Boxscore" JSON."""
+    return _cached_get(
+        RAW_DIR / f"{kind.lower()}_{competition}{season}_{gamecode}.json",
+        f"{BASE_URL}/{kind}",
+        {"gamecode": gamecode, "seasoncode": f"{competition}{season}"},
+    )
+
+
+def fetch_season_games(competition, season):
+    """Return {gameCode: game} for a whole season (one request, cached).
+
+    This list has unambiguous UTC start times and clean club names.
+    """
+    data = _cached_get(
+        RAW_DIR / f"games_{competition}{season}.json",
+        f"{SEASON_GAMES_URL}/{competition}/seasons/{competition}{season}/games",
+    )
+    return {game["gameCode"]: game for game in data["data"]}
 
 
 def _clean(value):
@@ -102,16 +115,15 @@ def season_name(season):
     return f"{season}-{(season + 1) % 100:02d}"
 
 
-def parse_start_time(date_text, hour_text):
-    """Header Date is day/month/year. Returns ISO 8601 without a timezone.
+def utc_start_time(schedule_game):
+    """Return the game's start as ISO 8601 UTC, e.g. '2024-10-03T16:45:00Z'.
 
-    The timezone of `Hour` is not stated by the source, so no offset is
-    attached until it has been checked against a published tip-off time.
+    The season list has three times: `date` (Central European Time),
+    `localDate` (venue local time) and `utcDate`. Only utcDate is unambiguous,
+    and storing UTC everywhere keeps games from different timezones sortable.
     """
-    moment = datetime.strptime(
-        f"{_clean(date_text)} {_clean(hour_text)}", "%d/%m/%Y %H:%M"
-    )
-    return moment.isoformat(timespec="minutes")
+    moment = datetime.fromisoformat(schedule_game["utcDate"].replace("Z", "+00:00"))
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _stat_items(row, entity_type, side, player=None):
@@ -133,20 +145,28 @@ def _stat_items(row, entity_type, side, player=None):
     return items
 
 
-def build_game_bundle(header, boxscore, competition, season, gamecode):
-    """Turn one game's Header + Boxscore JSON into a save_game_bundle() dict.
+def build_game_bundle(header, boxscore, schedule_game, competition, season, gamecode):
+    """Turn one game's Header, Boxscore and season-list entry into a save_game_bundle() dict.
 
-    TeamA in the Header is the home team, and the box score lists TeamA first.
+    The season list's "local" club is the home team. The Header's TeamA and
+    the box score's first team must be that same club, or we refuse to save.
     """
     sides = ("home", "away")
     team_stats = boxscore["Stats"]
-    codes = (_clean(header["CodeTeamA"]), _clean(header["CodeTeamB"]))
+    home_club = schedule_game["local"]["club"]
+    away_club = schedule_game["road"]["club"]
+    codes = (home_club["code"], away_club["code"])
+
+    label = f"{competition}{season} game {gamecode}"
+    if (_clean(header["CodeTeamA"]), _clean(header["CodeTeamB"])) != codes:
+        raise ValueError(f"Header teams do not match the season list for {label}.")
     for side_stats, code in zip(team_stats, codes):
-        first_player = side_stats["PlayersStats"][0]
-        if _clean(first_player["Team"]) != code:
-            raise ValueError(
-                f"Box score team order does not match the Header for {competition}{season} game {gamecode}."
-            )
+        if _clean(side_stats["PlayersStats"][0]["Team"]) != code:
+            raise ValueError(f"Box score team order does not match the season list for {label}.")
+    if (int(header["ScoreA"]), int(header["ScoreB"])) != (
+        schedule_game["local"]["score"], schedule_game["road"]["score"]
+    ):
+        raise ValueError(f"Header score does not match the season list for {label}.")
 
     appearances, stats = [], []
     for side, side_stats in zip(sides, team_stats):
@@ -187,9 +207,9 @@ def build_game_bundle(header, boxscore, competition, season, gamecode):
             "gender": "men",
         },
         "season": {"name": season_name(season)},
-        "home_team": {"name": _clean(header["TeamA"]).title(), "source_team_id": codes[0]},
-        "away_team": {"name": _clean(header["TeamB"]).title(), "source_team_id": codes[1]},
-        "start_time": parse_start_time(header["Date"], header["Hour"]),
+        "home_team": {"name": home_club["name"], "source_team_id": codes[0]},
+        "away_team": {"name": away_club["name"], "source_team_id": codes[1]},
+        "start_time": utc_start_time(schedule_game),
         "status": "live" if header.get("Live") else "finished",
         "home_score": int(header["ScoreA"]),
         "away_score": int(header["ScoreB"]),
@@ -200,9 +220,10 @@ def build_game_bundle(header, boxscore, competition, season, gamecode):
 
 def ingest_game(competition, season, gamecode):
     """Fetch (or read cached) data for one game and save it. Returns the game's DB id."""
+    schedule_game = fetch_season_games(competition, season)[gamecode]
     header = fetch_json("Header", competition, season, gamecode)
     boxscore = fetch_json("Boxscore", competition, season, gamecode)
-    bundle = build_game_bundle(header, boxscore, competition, season, gamecode)
+    bundle = build_game_bundle(header, boxscore, schedule_game, competition, season, gamecode)
     return save_game_bundle(bundle)
 
 
