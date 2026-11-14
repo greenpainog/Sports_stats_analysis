@@ -5,7 +5,8 @@ package uses. Every response is saved under data/raw/euroleague/ and read from
 there afterwards, so each game is downloaded at most once.
 
 Run from the project root, for example:
-    python -m ingestion.euroleague --season 2024 --game 1
+    python -m ingestion.euroleague --season 2024 --game 1   # one game
+    python -m ingestion.euroleague --season 2024            # whole season
 """
 import argparse
 import json
@@ -227,12 +228,38 @@ def ingest_game(competition, season, gamecode):
     return save_game_bundle(bundle)
 
 
+def ingest_season(competition, season):
+    """Load every played game of a season. One bad game is reported, not fatal.
+
+    Returns a list of (gamecode, error message) for games that failed.
+    """
+    games = fetch_season_games(competition, season)
+    played = sorted(code for code, game in games.items() if game.get("played"))
+    failures = []
+    for number, gamecode in enumerate(played, start=1):
+        try:
+            ingest_game(competition, season, gamecode)
+            status = "ok"
+        except Exception as exc:  # keep going; report at the end
+            failures.append((gamecode, f"{type(exc).__name__}: {exc}"))
+            status = f"FAILED ({type(exc).__name__})"
+        print(f"[{number}/{len(played)}] game {gamecode}: {status}", flush=True)
+
+    print(f"Done: {len(played) - len(failures)} saved, {len(failures)} failed.")
+    for gamecode, message in failures:
+        print(f"  game {gamecode}: {message}")
+    return failures
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Load one Euroleague/EuroCup game.")
+    parser = argparse.ArgumentParser(description="Load Euroleague/EuroCup games.")
     parser.add_argument("--competition", choices=sorted(COMPETITION_NAMES), default="E")
     parser.add_argument("--season", type=int, required=True, help="Start year, e.g. 2024")
-    parser.add_argument("--game", type=int, required=True, help="Game code")
+    parser.add_argument("--game", type=int, help="Game code; omit to load the whole season")
     args = parser.parse_args()
+    if args.game is None:
+        failures = ingest_season(args.competition, args.season)
+        raise SystemExit(1 if failures else 0)
     game_id = ingest_game(args.competition, args.season, args.game)
     print(f"Saved {args.competition}{args.season} game {args.game} as games.id={game_id}")
 

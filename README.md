@@ -29,6 +29,7 @@ python analysis_runner.py --list-stats
 
 # Load one Euroleague game (season = start year). Responses are cached in data/raw/.
 python -m ingestion.euroleague --season 2024 --game 1
+python -m ingestion.euroleague --season 2024    # whole season (~11 min the first time)
 
 # Run the tests
 python -m unittest discover -s tests -t .
@@ -63,7 +64,7 @@ least one second apart. Data files, API keys and `.env` are never committed.
 ## Roadmap
 
 0. Housekeeping ✅
-1. Euroleague ingestion (one full season)
+1. Euroleague ingestion (one full season) ✅ 2024-25 loaded: 330 games
 2. Team/player alias tables and name resolution
 3. Query layer (opponent, home/away, last N, opponent over .500, player absent)
 4. FastAPI + Pydantic `QuerySpec` API
