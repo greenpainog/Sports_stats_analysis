@@ -10,7 +10,13 @@ from typing import Literal
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
-from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS, QueryError, query_stats
+from analysis.stat_query import (
+    COUNTING_STATS,
+    PERCENTAGE_STATS,
+    RESULT_STATS,
+    QueryError,
+    query_stats,
+)
 from api.models import ErrorResponse, QueryResponse, QuerySpec, ResolveResponse
 from database.aliases import resolve_player, resolve_team
 
@@ -39,7 +45,11 @@ def health():
 @app.get("/stats")
 def list_stats():
     """The stat names a QuerySpec may use."""
-    return {"counting": list(COUNTING_STATS), "percentages": list(PERCENTAGE_STATS)}
+    return {
+        "counting": list(COUNTING_STATS),
+        "percentages": list(PERCENTAGE_STATS),
+        "results": list(RESULT_STATS),
+    }
 
 
 @app.get("/resolve/{kind}", response_model=ResolveResponse)

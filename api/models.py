@@ -8,11 +8,11 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS
+from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS, RESULT_STATS
 
 # Literal[...] from the tuples gives the JSON schema an exact list of allowed
 # values, so an unknown stat name is rejected before any SQL runs.
-StatName = Literal[COUNTING_STATS + tuple(PERCENTAGE_STATS)]
+StatName = Literal[COUNTING_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS]
 Venue = Literal["home", "away", "neutral"]
 Phase = Literal["regular_season", "play_in", "playoffs", "final_four"]
 
@@ -24,7 +24,10 @@ class QuerySpec(BaseModel):
 
     stats: list[StatName] = Field(
         min_length=1, max_length=8,
-        description="Stats to report. Percentages (fg3_pct, ...) are computed from makes and attempts.",
+        description=(
+            "Stats to report. Percentages (fg3_pct, ...) are computed from makes and attempts; "
+            "win_pct is the win-loss record of the subject's team in the matching games."
+        ),
     )
     player: Optional[str] = Field(None, description="Player name, e.g. 'Kendrick Nunn' or 'Nunn'.")
     team: Optional[str] = Field(None, description="Team name, e.g. 'Panathinaikos' or 'Real'.")
@@ -43,13 +46,27 @@ class QuerySpec(BaseModel):
     )
     season: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}$", description="Season such as '2024-25'.")
     phase: Optional[Phase] = None
+    max_rest_hours: Optional[float] = Field(
+        None, gt=0, le=24 * 365,
+        description=(
+            "Only games played at most this many hours after the team's previous game, "
+            "e.g. 48 for back-to-back weeks. Counts loaded (Euroleague) games only."
+        ),
+    )
+    min_rest_hours: Optional[float] = Field(
+        None, gt=0, le=24 * 365,
+        description="Only games played at least this many hours after the team's previous game.",
+    )
 
     @model_validator(mode="after")
-    def one_subject_and_unique_stats(self):
+    def check_combinations(self):
         if (self.player is None) == (self.team is None):
             raise ValueError("Give exactly one of 'player' or 'team'.")
         if len(set(self.stats)) != len(self.stats):
             raise ValueError("Each stat may be listed only once.")
+        if (self.min_rest_hours is not None and self.max_rest_hours is not None
+                and self.min_rest_hours > self.max_rest_hours):
+            raise ValueError("min_rest_hours cannot be more than max_rest_hours.")
         return self
 
 
@@ -60,6 +77,8 @@ class GameRow(BaseModel):
     venue: Venue
     team_score: Optional[int]
     opponent_score: Optional[int]
+    rest_hours: Optional[float] = Field(description="Hours since this team's previous loaded game.")
+    opponent_rest_hours: Optional[float]
     values: dict[str, Optional[float | str]]
 
 
@@ -71,6 +90,8 @@ class StatSummary(BaseModel):
     made: Optional[float] = None
     attempted: Optional[float] = None
     pct: Optional[float] = None
+    wins: Optional[int] = None
+    losses: Optional[int] = None
 
 
 class QueryResponse(BaseModel):

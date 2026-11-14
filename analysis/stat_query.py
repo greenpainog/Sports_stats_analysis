@@ -6,6 +6,7 @@
     query_stats(["total_rebounds"], team="Panathinaikos", opponent="Zalgiris",
                 venue="away", without_player="Cedi Osman")
     query_stats(["points", "fg3_pct"], player="Fournier", with_player="Dorsey")
+    query_stats(["win_pct", "turnovers", "fg_pct"], team="Olympiacos", max_rest_hours=48)
 
 Names are resolved through the alias tables. The SQL is always built here from
 these arguments, never written by a caller (later, never by the LLM). Filters
@@ -36,6 +37,10 @@ PERCENTAGE_STATS = {
     "fg_pct": (("fg2_made", "fg3_made"), ("fg2_attempted", "fg3_attempted")),
 }
 
+# Computed from the game result rather than stored. Works for teams and for
+# players (the record of the player's team in the games he played).
+RESULT_STATS = ("win_pct",)
+
 VENUES = ("home", "away", "neutral")
 
 
@@ -58,7 +63,9 @@ class GameLine:
     venue: str
     team_score: int
     opponent_score: int
-    values: dict  # stat name -> value; percentages as "made/attempted"
+    rest_hours: float  # since this team's previous loaded game; None if first
+    opponent_rest_hours: float
+    values: dict  # stat name -> value; percentages as "made/attempted"; win_pct as "W"/"L"
 
 
 @dataclass
@@ -70,6 +77,8 @@ class StatSummary:
     made: float = None
     attempted: float = None
     pct: float = None  # 0-100, None when there were no attempts
+    wins: int = None  # win_pct only
+    losses: int = None
 
 
 @dataclass
@@ -88,7 +97,9 @@ class QueryResult:
         count = len(self.games)
         lines = [f"{self.subject} ({conditions}), {count} game{'s' if count != 1 else ''}:"]
         for s in self.summary.values():
-            if s.pct is not None or s.attempted is not None:
+            if s.wins is not None:
+                lines.append(f"  {s.stat}: {s.wins}-{s.losses} = {s.pct:.1f}%")
+            elif s.pct is not None or s.attempted is not None:
                 pct = "n/a" if s.pct is None else f"{s.pct:.1f}%"
                 lines.append(f"  {s.stat}: {s.made:g}/{s.attempted:g} = {pct}")
             else:
@@ -107,8 +118,11 @@ def _resolve(resolver, text, label):
 
 
 # One row per team per game. Neutral-venue games are neither home nor away.
+# rest_hours: hours since this team's previous game in the database (NULL for
+# its first game). Only games we have count, so a domestic-league game in
+# between is invisible: this is rest between *loaded* games, an upper bound.
 TEAM_GAMES_CTE = """
-WITH team_games AS (
+WITH sides AS (
     SELECT g.id AS game_id, g.season_id, g.start_time, g.phase,
            g.home_team_id AS team_id, g.away_team_id AS opponent_id,
            CASE WHEN g.is_neutral_venue = 1 THEN 'neutral' ELSE 'home' END AS venue,
@@ -120,6 +134,13 @@ WITH team_games AS (
            CASE WHEN g.is_neutral_venue = 1 THEN 'neutral' ELSE 'away' END,
            g.away_score, g.home_score
     FROM games g
+),
+team_games AS (
+    SELECT sides.*,
+           ROUND((julianday(start_time) - julianday(
+               LAG(start_time) OVER (PARTITION BY team_id ORDER BY start_time)
+           )) * 24, 1) AS rest_hours
+    FROM sides
 )
 """
 
@@ -144,6 +165,8 @@ def query_stats(
     with_player=None,
     season=None,
     phase=None,
+    max_rest_hours=None,
+    min_rest_hours=None,
 ):
     """Return a QueryResult for one player or one team.
 
@@ -158,7 +181,16 @@ def query_stats(
         team's later games still count as "without" him.
     with_player: only games in which this player appeared (for either team).
     season: season name such as "2024-25". phase: e.g. "regular_season".
+    max_rest_hours / min_rest_hours: hours since the subject's team played
+        its previous loaded game (e.g. max_rest_hours=48 for two games within
+        48 hours). A team's first loaded game has no rest value and is left
+        out by these filters. Only loaded competitions count (see above).
     """
+    for name, hours in (("max_rest_hours", max_rest_hours), ("min_rest_hours", min_rest_hours)):
+        if hours is not None and hours <= 0:
+            raise QueryError(f"{name} must be more than 0.")
+    if max_rest_hours is not None and min_rest_hours is not None and min_rest_hours > max_rest_hours:
+        raise QueryError("min_rest_hours cannot be more than max_rest_hours.")
     if (player is None) == (team is None):
         raise QueryError("Ask about exactly one player or one team.")
     if venue is not None and venue not in VENUES:
@@ -227,11 +259,21 @@ def query_stats(
             filters["phase"] = phase
             where.append("tg.phase = ?")
             params.append(phase)
+        if max_rest_hours is not None:
+            filters["max_rest_hours"] = max_rest_hours
+            where.append("tg.rest_hours <= ?")
+            params.append(max_rest_hours)
+        if min_rest_hours is not None:
+            filters["min_rest_hours"] = min_rest_hours
+            where.append("tg.rest_hours >= ?")
+            params.append(min_rest_hours)
 
         sql = f"""{TEAM_GAMES_CTE}
-            SELECT tg.game_id, tg.start_time, opp.name, tg.venue, tg.team_score, tg.opponent_score
+            SELECT tg.game_id, tg.start_time, opp.name, tg.venue, tg.team_score, tg.opponent_score,
+                   tg.rest_hours, ot.rest_hours
             FROM {source}
             JOIN teams opp ON opp.id = tg.opponent_id
+            JOIN team_games ot ON ot.game_id = tg.game_id AND ot.team_id = tg.opponent_id
             WHERE {' AND '.join(where)}
             ORDER BY tg.start_time DESC"""
         if last_n is not None:
@@ -245,10 +287,12 @@ def query_stats(
         conn.close()
 
     result = QueryResult(subject=subject, subject_type=subject_type, filters=filters)
-    for game_id, start_time, opp_name, game_venue, team_score, opp_score in reversed(game_rows):
+    for game_id, start_time, opp_name, game_venue, team_score, opp_score, rest, opp_rest in reversed(game_rows):
+        # Basketball has no draws, so a game is either a win or a loss.
+        values.setdefault(game_id, {})["win"] = 1 if team_score > opp_score else 0
         result.games.append(GameLine(
-            game_id, start_time, opp_name, game_venue, team_score, opp_score,
-            _game_values(stats, values.get(game_id, {})),
+            game_id, start_time, opp_name, game_venue, team_score, opp_score, rest, opp_rest,
+            _game_values(stats, values[game_id]),
         ))
     result.summary = {stat: _summarise(stat, values, [g.game_id for g in result.games]) for stat in stats}
     return result
@@ -256,7 +300,8 @@ def query_stats(
 
 def _check_stats(conn, stats):
     stored = {row[0] for row in conn.execute("SELECT DISTINCT stat_name FROM game_stats")}
-    unknown = [s for s in stats if s not in stored and s not in PERCENTAGE_STATS]
+    unknown = [s for s in stats if s not in stored and s not in PERCENTAGE_STATS
+               and s not in RESULT_STATS]
     if unknown:
         raise QueryError(f"Unknown stat(s): {', '.join(unknown)}.")
 
@@ -282,7 +327,9 @@ def _load_values(conn, subject_type, subject_id, game_ids):
 def _game_values(stats, game_values):
     shown = {}
     for stat in stats:
-        if stat in PERCENTAGE_STATS:
+        if stat == "win_pct":
+            shown[stat] = "W" if game_values["win"] else "L"
+        elif stat in PERCENTAGE_STATS:
             made_cols, attempt_cols = PERCENTAGE_STATS[stat]
             made = sum(game_values.get(c) or 0 for c in made_cols)
             attempted = sum(game_values.get(c) or 0 for c in attempt_cols)
@@ -294,6 +341,10 @@ def _game_values(stats, game_values):
 
 def _summarise(stat, values, game_ids):
     games = len(game_ids)
+    if stat == "win_pct":
+        wins = sum(values[g]["win"] for g in game_ids)
+        pct = round(100 * wins / games, 1) if games else None
+        return StatSummary(stat, games, pct=pct, wins=wins, losses=games - wins)
     if stat in PERCENTAGE_STATS:
         made_cols, attempt_cols = PERCENTAGE_STATS[stat]
         made = sum(values.get(g, {}).get(c) or 0 for g in game_ids for c in made_cols)

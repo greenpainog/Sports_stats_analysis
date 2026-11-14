@@ -40,6 +40,8 @@ def test_queryspec_accepts_a_valid_question():
     {"stats": ["assists"], "player": "Nunn", "last_n": 0},         # last_n too small
     {"stats": ["assists"], "player": "Nunn", "season": "2024"},    # bad season format
     {"stats": ["assists"], "player": "Nunn", "sql": "DROP TABLE"},  # unknown field
+    {"stats": ["assists"], "player": "Nunn", "max_rest_hours": -5},  # negative rest
+    {"stats": ["assists"], "player": "Nunn", "min_rest_hours": 72, "max_rest_hours": 48},
 ])
 def test_queryspec_rejects_invalid_questions(bad):
     with pytest.raises(ValidationError):
@@ -86,6 +88,16 @@ def test_query_with_player(client):
     }).json()
     assert [g["game_id"] for g in body["games"]] == [2, 3]
     assert body["filters"] == {"with_player": "Sid Kick"}
+
+
+def test_query_rest_and_win_pct(client):
+    body = client.post("/query", json={
+        "stats": ["win_pct", "total_rebounds"], "team": "Alpha", "max_rest_hours": 48,
+    }).json()
+    (game,) = body["games"]
+    assert (game["start_time"][:10], game["rest_hours"], game["opponent_rest_hours"]) == ("2024-10-24", 48, 216)
+    assert game["values"]["win_pct"] == "L"
+    assert (body["summary"]["win_pct"]["wins"], body["summary"]["win_pct"]["losses"]) == (0, 1)
 
 
 def test_invalid_spec_is_422(client):

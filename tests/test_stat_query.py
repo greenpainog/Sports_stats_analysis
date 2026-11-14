@@ -7,6 +7,7 @@ Teams Alpha, Beta, Gamma. Games in order:
   g4 2024-10-22  Alpha 85 - 80 Beta   neutral venue; Beta was 2-0 -> over .500
 
 Shooter (Alpha) plays g2, g3, g4. Sidekick (Alpha) plays g2, g3 only.
+g7 2024-10-24  Alpha 88 - 90 Gamma  48 hours after Alpha's g4 (Sid Kick plays)
 g5 2024-10-29  Gamma 70 - 72 Beta (adds Olly Kick, so "Kick" is ambiguous)
 g6 2025-10-07  Alpha 77 - 70 Gamma, season 2025-26, no Alpha player stats
 """
@@ -67,9 +68,16 @@ GAMES = [
           alpha_players=[(SHOOTER, 6, 14, 4), (SIDEKICK, 1, 1, 1)]),
     _game(4, "2024-10-22", "ALP", "BET", 85, 80, neutral=True,
           alpha_players=[(SHOOTER, 2, 5, 6)]),
+    # Exactly 48 hours after Alpha's g4; Gamma last played g3 (216 hours before).
+    _game(7, "2024-10-24", "ALP", "GAM", 88, 90,
+          alpha_players=[(SIDEKICK, 0, 1, 2)]),
     # Next season; Sid Kick has not played for Alpha in 2025-26.
     _game(6, "2025-10-07", "ALP", "GAM", 77, 70, season="2025-26"),
 ]
+
+
+def _day(game):
+    return game.start_time[:10]
 
 
 def build_test_league():
@@ -166,6 +174,45 @@ class StatQueryTests(unittest.TestCase):
             query_stats(["assists"], player="Shooter", with_player="Sid Kick", without_player="S. Kick")
         self.assertIn("both", str(ctx.exception))
 
+    # Rest tests name games by date: database ids follow insert order, not game codes.
+
+    def test_rest_hours_on_each_game(self):
+        result = query_stats(["total_rebounds"], team="Alpha")
+        rest = {_day(g): g.rest_hours for g in result.games}
+        # 8 Oct (g2) is Alpha's first loaded game, so it has no rest value.
+        self.assertEqual(
+            {day: rest[day] for day in ("2024-10-08", "2024-10-15", "2024-10-22", "2024-10-24")},
+            {"2024-10-08": None, "2024-10-15": 168, "2024-10-22": 168, "2024-10-24": 48},
+        )
+        g7 = next(g for g in result.games if _day(g) == "2024-10-24")
+        self.assertEqual(g7.opponent_rest_hours, 216)  # Gamma: 15 Oct -> 24 Oct
+
+    def test_max_and_min_rest_hours(self):
+        short = query_stats(["total_rebounds"], team="Alpha", max_rest_hours=48)
+        self.assertEqual([_day(g) for g in short.games], ["2024-10-24"])
+        rested = query_stats(["total_rebounds"], team="Alpha", min_rest_hours=100)
+        # The first game (8 Oct) has no rest value, so it is left out.
+        self.assertEqual([_day(g) for g in rested.games], ["2024-10-15", "2024-10-22", "2025-10-07"])
+        both = query_stats(["total_rebounds"], team="Alpha", min_rest_hours=100, max_rest_hours=200)
+        self.assertEqual([_day(g) for g in both.games], ["2024-10-15", "2024-10-22"])
+
+    def test_win_pct(self):
+        # Alpha: g2 L, g3 W, g4 W, g7 L, g6 W -> 3-2.
+        result = query_stats(["win_pct"], team="Alpha")
+        s = result.summary["win_pct"]
+        self.assertEqual((s.wins, s.losses, s.pct), (3, 2, 60.0))
+        self.assertEqual([g.values["win_pct"] for g in result.games], ["L", "W", "W", "L", "W"])
+        self.assertIn("win_pct: 3-2 = 60.0%", result.describe())
+
+    def test_win_pct_for_a_player_is_his_teams_record(self):
+        # Shooter played g2 (L), g3 (W), g4 (W).
+        s = query_stats(["win_pct"], player="Shooter").summary["win_pct"]
+        self.assertEqual((s.wins, s.losses), (2, 1))
+
+    def test_win_pct_on_short_rest(self):
+        s = query_stats(["win_pct"], team="Alpha", max_rest_hours=48).summary["win_pct"]
+        self.assertEqual((s.wins, s.losses, s.pct), (0, 1, 0.0))
+
     def test_team_stats_and_scores_from_teams_point_of_view(self):
         result = query_stats(["total_rebounds"], team="Alpha", venue="away")
         (game,) = result.games
@@ -189,6 +236,8 @@ class StatQueryTests(unittest.TestCase):
             {"stats": ["assists"], "player": "Shooter", "team": "Alpha"},
             {"stats": ["assists"], "player": "Shooter", "venue": "road"},
             {"stats": ["assists"], "player": "Shooter", "last_n": 0},
+            {"stats": ["assists"], "player": "Shooter", "max_rest_hours": 0},
+            {"stats": ["assists"], "player": "Shooter", "min_rest_hours": 72, "max_rest_hours": 48},
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(QueryError):
                 query_stats(**kwargs)
