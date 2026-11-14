@@ -1,0 +1,50 @@
+{"id": "q01", "category": "basic_player", "question": "How many points per game does Kendrick Nunn average?", "gold": {"stats": ["points"], "player": "Kendrick Nunn"}}
+{"id": "q02", "category": "basic_player", "question": "Vezenkov's rebounds", "gold": {"stats": ["total_rebounds"], "player": "Sasha Vezenkov"}}
+{"id": "q03", "category": "basic_player", "question": "What is Campazzo's assist average?", "gold": {"stats": ["assists"], "player": "Facundo Campazzo"}}
+{"id": "q04", "category": "basic_player", "question": "Walter Tavares blocks per game", "gold": {"stats": ["blocks"], "player": "Walter Tavares"}}
+{"id": "q05", "category": "basic_player", "question": "Shane Larkin free throw percentage", "gold": {"stats": ["ft_pct"], "player": "Shane Larkin"}}
+{"id": "q06", "category": "basic_player", "question": "How did Mike James play this season?", "gold": {"stats": ["points", "total_rebounds", "assists"], "player": "Mike James", "season": "2026-27"}}
+{"id": "q07", "category": "basic_team", "question": "Real Madrid's turnovers per game this season", "gold": {"stats": ["turnovers"], "team": "Real Madrid", "season": "2026-27"}}
+{"id": "q08", "category": "basic_team", "question": "Olympiacos three point percentage last season", "gold": {"stats": ["fg3_pct"], "team": "Olympiacos Piraeus", "season": "2025-26"}}
+{"id": "q09", "category": "basic_team", "question": "What's Fenerbahce's record?", "gold": {"stats": ["win_pct"], "team": "Fenerbahce Tarfin Istanbul"}}
+{"id": "q10", "category": "basic_team", "question": "Barcelona offensive rebounds and steals", "gold": {"stats": ["offensive_rebounds", "steals"], "team": "FC Barcelona"}}
+{"id": "q11", "category": "opponent", "question": "Jerian Grant's 3P% against Real Madrid", "gold": {"stats": ["fg3_pct"], "player": "Jerian Grant", "opponent": "Real Madrid"}}
+{"id": "q12", "category": "opponent", "question": "Panathinaikos record vs Olympiacos", "gold": {"stats": ["win_pct"], "team": "Panathinaikos AKTOR Athens", "opponent": "Olympiacos Piraeus"}}
+{"id": "q13", "category": "opponent", "question": "How many points has Fournier scored against Panathinaikos?", "gold": {"stats": ["points"], "player": "Evan Fournier", "opponent": "Panathinaikos AKTOR Athens"}}
+{"id": "q14", "category": "opponent", "question": "Zalgiris rebounds versus Partizan", "gold": {"stats": ["total_rebounds"], "team": "Zalgiris Kaunas", "opponent": "Partizan Mozzart Bet Belgrade"}}
+{"id": "q15", "category": "venue", "question": "Jerian Grant's 3P% against Real Madrid away", "gold": {"stats": ["fg3_pct"], "player": "Jerian Grant", "opponent": "Real Madrid", "venue": "away"}}
+{"id": "q16", "category": "venue", "question": "Partizan's win percentage at home", "gold": {"stats": ["win_pct"], "team": "Partizan Mozzart Bet Belgrade", "venue": "home"}}
+{"id": "q17", "category": "venue", "question": "Nadir Hifi points on the road this season", "gold": {"stats": ["points"], "player": "Nadir Hifi", "venue": "away", "season": "2026-27"}}
+{"id": "q18", "category": "venue", "question": "Monaco's field goal percentage in home games last season", "gold": {"stats": ["fg_pct"], "team": "AS Monaco", "venue": "home", "season": "2025-26"}}
+{"id": "q19", "category": "last_n", "question": "Nunn's 3-point percentage in his last 5 games", "gold": {"stats": ["fg3_pct"], "player": "Kendrick Nunn", "last_n": 5}}
+{"id": "q20", "category": "last_n", "question": "Kevin Punter points in the last 10 games", "gold": {"stats": ["points"], "player": "Kevin Punter", "last_n": 10}}
+{"id": "q21", "category": "last_n", "question": "Paris Basketball's turnovers over their last 3 games", "gold": {"stats": ["turnovers"], "team": "Paris Basketball", "last_n": 3}}
+{"id": "q22", "category": "last_n", "question": "How has Sloukas played recently?", "gold": {"stats": ["points", "total_rebounds", "assists"], "player": "Kostas Sloukas", "last_n": 5}}
+{"id": "q23", "category": "over_500", "question": "Jerian Grant's turnovers and assists against teams over .500", "gold": {"stats": ["turnovers", "assists"], "player": "Jerian Grant", "opponent_over_500": true}}
+{"id": "q24", "category": "over_500", "question": "Real Madrid's record against winning teams this season", "gold": {"stats": ["win_pct"], "team": "Real Madrid", "opponent_over_500": true, "season": "2026-27"}}
+{"id": "q25", "category": "over_500", "question": "Wade Baldwin's PIR against teams with a winning record", "gold": {"stats": ["pir"], "player": "Wade Baldwin IV", "opponent_over_500": true}}
+{"id": "q26", "category": "with_without", "question": "Panathinaikos rebounds vs Zalgiris away when Valanciunas isn't playing", "gold": {"stats": ["total_rebounds"], "team": "Panathinaikos AKTOR Athens", "opponent": "Zalgiris Kaunas", "venue": "away", "without_player": "Jonas Valanciunas"}}
+{"id": "q27", "category": "with_without", "question": "Evan Fournier's points when Dorsey doesn't play", "gold": {"stats": ["points"], "player": "Evan Fournier", "without_player": "Tyler Dorsey"}}
+{"id": "q28", "category": "with_without", "question": "Fournier's points and 3P% when Tyler Dorsey plays", "gold": {"stats": ["points", "fg3_pct"], "player": "Evan Fournier", "with_player": "Tyler Dorsey"}}
+{"id": "q29", "category": "with_without", "question": "Olympiacos record without Vezenkov", "gold": {"stats": ["win_pct"], "team": "Olympiacos Piraeus", "without_player": "Sasha Vezenkov"}}
+{"id": "q30", "category": "with_without", "question": "Real Madrid assists in games Llull played", "gold": {"stats": ["assists"], "team": "Real Madrid", "with_player": "Sergio Llull"}}
+{"id": "q31", "category": "season_phase", "question": "Vezenkov's points in the 2024-25 playoffs", "gold": {"stats": ["points"], "player": "Sasha Vezenkov", "season": "2024-25", "phase": "playoffs"}}
+{"id": "q32", "category": "season_phase", "question": "Real Madrid's record in the Final Four", "gold": {"stats": ["win_pct"], "team": "Real Madrid", "phase": "final_four"}}
+{"id": "q33", "category": "season_phase", "question": "Panathinaikos three-point percentage in the 2025/26 regular season", "gold": {"stats": ["fg3_pct"], "team": "Panathinaikos AKTOR Athens", "season": "2025-26", "phase": "regular_season"}}
+{"id": "q34", "category": "season_phase", "question": "Tavares rebounds in the playoffs", "gold": {"stats": ["total_rebounds"], "player": "Walter Tavares", "phase": "playoffs"}}
+{"id": "q35", "category": "season_phase", "question": "How many steals did Hayes-Davis have in 2024-25?", "gold": {"stats": ["steals"], "player": "Nigel Hayes-Davis", "season": "2024-25"}}
+{"id": "q36", "category": "rest", "question": "Olympiacos win percentage in back-to-back games", "gold": {"stats": ["win_pct"], "team": "Olympiacos Piraeus", "max_rest_hours": 48}}
+{"id": "q37", "category": "rest", "question": "Panathinaikos turnovers when playing within 48 hours of their last game", "gold": {"stats": ["turnovers"], "team": "Panathinaikos AKTOR Athens", "max_rest_hours": 48}}
+{"id": "q38", "category": "rest", "question": "Real Madrid's field goal percentage on short rest this season", "gold": {"stats": ["fg_pct"], "team": "Real Madrid", "max_rest_hours": 48, "season": "2026-27"}}
+{"id": "q39", "category": "rest", "question": "Fenerbahce record with 3 or more days of rest", "gold": {"stats": ["win_pct"], "team": "Fenerbahce Tarfin Istanbul", "min_rest_hours": 72}}
+{"id": "q40", "category": "rest", "question": "Zalgiris shooting with 2 days of rest or less", "gold": {"stats": ["fg_pct"], "team": "Zalgiris Kaunas", "max_rest_hours": 48}}
+{"id": "q41", "category": "name_variants", "question": "Kendric Nun assists last season", "gold": {"stats": ["assists"], "player": "Kendrick Nunn", "season": "2025-26"}}
+{"id": "q42", "category": "name_variants", "question": "Jonas Valančiūnas rebounds per game", "gold": {"stats": ["total_rebounds"], "player": "Jonas Valanciunas"}}
+{"id": "q43", "category": "name_variants", "question": "Pana's blocks at home", "gold": {"stats": ["blocks"], "team": "Panathinaikos AKTOR Athens", "venue": "home"}}
+{"id": "q44", "category": "name_variants", "question": "Sergio Lul 3-point % vs Barca", "gold": {"stats": ["fg3_pct"], "player": "Sergio Llull", "opponent": "FC Barcelona"}}
+{"id": "q45", "category": "unanswerable", "question": "How many points did LeBron James score in the NBA finals?", "gold": null}
+{"id": "q46", "category": "unanswerable", "question": "Who scored the most points in the EuroLeague this season?", "gold": null}
+{"id": "q47", "category": "unanswerable", "question": "Who will win the EuroLeague this year?", "gold": null}
+{"id": "q48", "category": "unanswerable", "question": "What's Kendrick Nunn's salary?", "gold": null}
+{"id": "q49", "category": "unanswerable", "question": "Is Nunn or Larkin the better shooter?", "gold": null}
+{"id": "q50", "category": "unanswerable", "question": "How many dunks did Tavares have this season?", "gold": null}

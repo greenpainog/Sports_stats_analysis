@@ -8,3 +8,4 @@ data/raw/
 data/*.db
 data/*.csv
 rebounds_data.csv
+eval/results/
