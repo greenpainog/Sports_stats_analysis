@@ -2,5 +2,14 @@
 pandas==3.1.1
 euroleague-api==0.1.1
 
+# API (phase 4). pydantic comes with fastapi; pinned so builds are repeatable.
+fastapi==0.162.0
+pydantic==2.14.3
+uvicorn==0.54.0
+
+# Tests
+pytest==9.2.0
+httpx==0.28.1
+
 # Legacy Flashscore scraper only (legacy/), not needed for the main app:
 # playwright
