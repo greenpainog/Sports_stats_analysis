@@ -246,10 +246,12 @@ def save_game_bundle(game_data):
             entity_column = "player_id" if player_id is not None else "team_id"
             entity_id = player_id if player_id is not None else team_id
             period = stat.get("period", "match")
+            # Filter on entity_type too: player rows also carry a team_id, so
+            # a team-stat lookup by team_id alone would match a player's row.
             cursor.execute(
-                f"""SELECT id FROM game_stats WHERE game_id = ?
+                f"""SELECT id FROM game_stats WHERE game_id = ? AND entity_type = ?
                     AND {entity_column} = ? AND stat_name = ? AND period = ?""",
-                (game_id, entity_id, stat["stat_name"], period),
+                (game_id, entity_type, entity_id, stat["stat_name"], period),
             )
             existing_stat = cursor.fetchone()
             stat_values = (
