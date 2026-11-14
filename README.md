@@ -104,6 +104,6 @@ least one second apart. Data files, API keys and `.env` are never committed.
 2. Team/player alias tables and name resolution ✅ `database.aliases.resolve_team()` / `resolve_player()`
 3. Query layer (opponent, home/away, last N, opponent over .500, player absent) ✅ `analysis.stat_query.query_stats()`
 4. FastAPI + Pydantic `QuerySpec` API ✅ `api/` (`POST /query`, `GET /resolve/{kind}`, `GET /stats`)
-5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ code done (`POST /ask`, `eval/`); accuracy not measured yet
+5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 50/50 with gpt-6-luna on 2026-11-14 (3 runs)
 6. Greek league ingestion
 7. Docker, demo, agent for multi-step questions, Azure deployment

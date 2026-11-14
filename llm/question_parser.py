@@ -92,7 +92,8 @@ Set answerable false, fill reason with one short sentence, and leave the other f
 - is about another competition (NBA, EuroCup, Greek league, ACB, national teams, ...);
 - needs data we do not have (shot locations, salaries, height, dunks, injuries, transfers, coaches, attendance, ...);
 - compares or ranks several subjects ("who scored the most", "league leaders", "Nunn or Larkin") — only one subject per question;
-- asks for a prediction or opinion, or is not a basketball stats question at all."""
+- asks for a prediction or opinion, or is not a basketball stats question at all.
+The reason must only say what the query can't express (e.g. "A query can't filter by the team a player was on."). You cannot see the database, so never claim facts about players, teams, transfers or results."""
 
 
 # --- The real LLM ------------------------------------------------------------
