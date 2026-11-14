@@ -7,7 +7,9 @@ then open http://127.0.0.1:8000/docs for interactive documentation.
 from dataclasses import asdict
 from typing import Literal
 
-from fastapi import FastAPI, Query, Request
+from functools import lru_cache
+
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
 from analysis.stat_query import (
@@ -17,8 +19,16 @@ from analysis.stat_query import (
     QueryError,
     query_stats,
 )
-from api.models import ErrorResponse, QueryResponse, QuerySpec, ResolveResponse
+from api.models import (
+    AskRequest,
+    AskResponse,
+    ErrorResponse,
+    QueryResponse,
+    QuerySpec,
+    ResolveResponse,
+)
 from database.aliases import resolve_player, resolve_team
+from llm.question_parser import OpenAILLM, parse_question
 
 app = FastAPI(
     title="European basketball stats",
@@ -71,6 +81,10 @@ def resolve(kind: Literal["team", "player"], name: str = Query(min_length=1)):
 )
 def run_query(spec: QuerySpec):
     """Answer one QuerySpec: the matching games plus a summary per stat."""
+    return _answer(spec)
+
+
+def _answer(spec: QuerySpec) -> QueryResponse:
     result = query_stats(**spec.model_dump())
     return QueryResponse(
         subject=result.subject,
@@ -80,3 +94,36 @@ def run_query(spec: QuerySpec):
         summary={stat: asdict(summary) for stat, summary in result.summary.items()},
         answer=result.describe(),
     )
+
+
+@lru_cache
+def get_llm():
+    """The LLM used by /ask. Tests replace it via app.dependency_overrides."""
+    return OpenAILLM()
+
+
+@app.post("/ask", response_model=AskResponse, responses={503: {"model": AskResponse}})
+def ask(request: AskRequest, llm=Depends(get_llm)):
+    """Answer a plain-language question.
+
+    The LLM turns the question into a QuerySpec; the spec is validated and run
+    exactly like POST /query. The LLM never writes SQL.
+    """
+    question = request.question
+    parsed = parse_question(question, llm=llm)
+    if parsed.status == "error":
+        body = AskResponse(question=question, status="error",
+                           message="The question service is unavailable right now. Try POST /query instead.")
+        return JSONResponse(status_code=503, content=body.model_dump())
+    if parsed.status in ("unanswerable", "invalid"):
+        return AskResponse(question=question, status=parsed.status, message=parsed.reason)
+
+    try:
+        result = _answer(parsed.spec)
+    except QueryError as exc:
+        return AskResponse(
+            question=question, status="needs_clarification", message=str(exc), spec=parsed.spec,
+            candidates=[{"id": i, "name": n} for i, n in exc.candidates],
+        )
+    return AskResponse(question=question, status="answered", message=result.answer,
+                       spec=parsed.spec, result=result)

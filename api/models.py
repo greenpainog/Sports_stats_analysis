@@ -118,3 +118,24 @@ class ResolveResponse(BaseModel):
 class ErrorResponse(BaseModel):
     detail: str
     candidates: list[Candidate] = []
+
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=500, examples=["Nunn's 3-point percentage in his last 5 games"])
+
+
+class AskResponse(BaseModel):
+    """The answer to a plain-language question, or why there isn't one."""
+
+    question: str
+    status: Literal["answered", "unanswerable", "needs_clarification", "invalid", "error"] = Field(
+        description=(
+            "answered: result is set. unanswerable: the data can't answer it. "
+            "needs_clarification: a name was unknown or ambiguous (see candidates). "
+            "invalid: the question couldn't be turned into a valid query. error: the LLM call failed."
+        )
+    )
+    message: str
+    spec: Optional[QuerySpec] = Field(None, description="The structured query the question was turned into.")
+    result: Optional[QueryResponse] = None
+    candidates: list[Candidate] = []
