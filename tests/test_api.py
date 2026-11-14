@@ -80,6 +80,14 @@ def test_query_with_filters(client):
     assert body["filters"] == {"without_player": "Sid Kick"}
 
 
+def test_query_with_player(client):
+    body = client.post("/query", json={
+        "stats": ["fg3_pct"], "player": "Shooter", "with_player": "Sid Kick",
+    }).json()
+    assert [g["game_id"] for g in body["games"]] == [2, 3]
+    assert body["filters"] == {"with_player": "Sid Kick"}
+
+
 def test_invalid_spec_is_422(client):
     response = client.post("/query", json={"stats": ["dunks"], "player": "Shooter"})
     assert response.status_code == 422

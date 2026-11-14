@@ -38,6 +38,9 @@ class QuerySpec(BaseModel):
         None,
         description="Only games this player missed, in seasons when he played for either team.",
     )
+    with_player: Optional[str] = Field(
+        None, description="Only games in which this player appeared (for either team)."
+    )
     season: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}$", description="Season such as '2024-25'.")
     phase: Optional[Phase] = None
 

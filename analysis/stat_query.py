@@ -5,6 +5,7 @@
     query_stats(["fg3_pct"], player="Jerian Grant", opponent="Real Madrid", venue="away")
     query_stats(["total_rebounds"], team="Panathinaikos", opponent="Zalgiris",
                 venue="away", without_player="Cedi Osman")
+    query_stats(["points", "fg3_pct"], player="Fournier", with_player="Dorsey")
 
 Names are resolved through the alias tables. The SQL is always built here from
 these arguments, never written by a caller (later, never by the LLM). Filters
@@ -140,6 +141,7 @@ def query_stats(
     last_n=None,
     opponent_over_500=False,
     without_player=None,
+    with_player=None,
     season=None,
     phase=None,
 ):
@@ -154,6 +156,7 @@ def query_stats(
         for the subject's team or the opponent (so games from before he
         joined do not count). Season-level: after a mid-season move, his old
         team's later games still count as "without" him.
+    with_player: only games in which this player appeared (for either team).
     season: season name such as "2024-25". phase: e.g. "regular_season".
     """
     if (player is None) == (team is None):
@@ -206,6 +209,16 @@ def query_stats(
                             WHERE r.player_id = ? AND rg.season_id = tg.season_id
                               AND r.team_id IN (tg.team_id, tg.opponent_id))""")
             params += [absent_id, absent_id]
+        if with_player is not None:
+            present_id, filters["with_player"] = _resolve(
+                lambda t: resolve_player(t, conn), with_player, "player"
+            )
+            if without_player is not None and present_id == absent_id:
+                raise QueryError("A player cannot be both 'with' and 'without' in the same question.")
+            where.append(
+                "EXISTS (SELECT 1 FROM game_appearances w WHERE w.game_id = tg.game_id AND w.player_id = ?)"
+            )
+            params.append(present_id)
         if season is not None:
             filters["season"] = season
             where.append("tg.season_id IN (SELECT id FROM seasons WHERE name = ?)")

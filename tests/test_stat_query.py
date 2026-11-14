@@ -142,6 +142,30 @@ class StatQueryTests(unittest.TestCase):
         result = query_stats(["total_rebounds"], team="Beta", without_player="Sid Kick")
         self.assertEqual([g.game_id for g in result.games], [4])
 
+    def test_with_player(self):
+        # Sid Kick played g2 and g3 for Alpha.
+        result = query_stats(["fg3_pct"], player="Shooter", with_player="Sid Kick")
+        self.assertEqual([g.game_id for g in result.games], [2, 3])
+        self.assertEqual(result.summary["fg3_pct"].pct, round(100 * 7 / 15, 1))
+        # Works when the player is on the opponent's side too.
+        beta = query_stats(["total_rebounds"], team="Beta", with_player="Sid Kick")
+        self.assertEqual([g.game_id for g in beta.games], [2])
+
+    def test_with_and_without_split_a_players_games(self):
+        everything = query_stats(["assists"], player="Shooter")
+        with_kick = query_stats(["assists"], player="Shooter", with_player="Sid Kick")
+        without_kick = query_stats(["assists"], player="Shooter", without_player="Sid Kick")
+        self.assertEqual(
+            sorted(g.game_id for g in with_kick.games + without_kick.games),
+            [g.game_id for g in everything.games],
+        )
+
+    def test_same_player_with_and_without_is_an_error(self):
+        # Two spellings of the same player.
+        with self.assertRaises(QueryError) as ctx:
+            query_stats(["assists"], player="Shooter", with_player="Sid Kick", without_player="S. Kick")
+        self.assertIn("both", str(ctx.exception))
+
     def test_team_stats_and_scores_from_teams_point_of_view(self):
         result = query_stats(["total_rebounds"], team="Alpha", venue="away")
         (game,) = result.games
