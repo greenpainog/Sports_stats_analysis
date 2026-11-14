@@ -302,7 +302,7 @@ def ingest_game(competition, season, gamecode):
     return save_game_bundle(bundle)
 
 
-def ingest_season(competition, season):
+def ingest_season(competition, season, verbose=True):
     """Load every played game of a season. One bad game is reported, not fatal.
 
     Returns a list of (gamecode, error message) for games that failed.
@@ -317,11 +317,13 @@ def ingest_season(competition, season):
         except Exception as exc:  # keep going; report at the end
             failures.append((gamecode, f"{type(exc).__name__}: {exc}"))
             status = f"FAILED ({type(exc).__name__})"
-        print(f"[{number}/{len(played)}] game {gamecode}: {status}", flush=True)
+        if verbose:
+            print(f"[{number}/{len(played)}] game {gamecode}: {status}", flush=True)
 
-    print(f"Done: {len(played) - len(failures)} saved, {len(failures)} failed.")
-    for gamecode, message in failures:
-        print(f"  game {gamecode}: {message}")
+    if verbose:
+        print(f"Done: {len(played) - len(failures)} saved, {len(failures)} failed.")
+        for gamecode, message in failures:
+            print(f"  game {gamecode}: {message}")
     return failures
 
 

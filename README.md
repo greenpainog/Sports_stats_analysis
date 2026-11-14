@@ -66,7 +66,7 @@ least one second apart. Data files, API keys and `.env` are never committed.
 0. Housekeeping ✅
 1. Euroleague ingestion (one full season) ✅ 2024-25 loaded: 330 games
 2. Team/player alias tables and name resolution ✅ `database.aliases.resolve_team()` / `resolve_player()`
-3. Query layer (opponent, home/away, last N, opponent over .500, player absent)
+3. Query layer (opponent, home/away, last N, opponent over .500, player absent) ✅ `analysis.stat_query.query_stats()`
 4. FastAPI + Pydantic `QuerySpec` API
 5. LLM question → validated `QuerySpec`, with a 50-question evaluation set
 6. Greek league ingestion
