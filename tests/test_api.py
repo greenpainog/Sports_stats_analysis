@@ -123,3 +123,10 @@ def test_resolve_endpoint(client):
     assert body["status"] == "match" and body["candidates"][0]["name"] == "Alpha"
     assert client.get("/resolve/player", params={"name": "Kick"}).json()["status"] == "ambiguous"
     assert client.get("/resolve/coach", params={"name": "x"}).status_code == 422
+
+
+def test_resolve_by_first_name_as_last_resort(client):
+    body = client.get("/resolve/player", params={"name": "Sam"}).json()
+    assert (body["status"], body["method"], body["candidates"][0]["name"]) == ("match", "first_name", "Sam Shooter")
+    # A surname still wins over a first name.
+    assert client.get("/resolve/player", params={"name": "Shooter"}).json()["method"] == "exact"

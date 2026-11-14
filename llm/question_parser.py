@@ -77,6 +77,7 @@ A spec has exactly one subject: one player OR one team.
 
 How to fill the spec:
 - Copy player and team names as the user wrote them (code resolves nicknames, surnames, accents and typos). Do not expand or correct them.
+- Users make typos in the rest of the question too. Read each one as its closest sensible meaning and apply it the same way every time: e.g. "his season" or "thsi season" at the end of a question means "this season".
 - "this season" -> season "{current}"; "last season" -> season "{previous}"; a season like "2024/25" -> "2024-25". No season mentioned -> season null (all loaded seasons).
 - "last N games" -> last_n N. "recently"/"lately" with no number -> last_n 5.
 - "at home" -> venue "home"; "on the road"/"away" -> venue "away".

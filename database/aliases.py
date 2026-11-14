@@ -81,7 +81,9 @@ class Resolution:
     """Result of resolving a name.
 
     status: 'match' (exactly one entity), 'ambiguous' or 'not_found'.
-    method: 'exact' or 'fuzzy' (fuzzy means the spelling was corrected).
+    method: 'exact', 'fuzzy' (the spelling was corrected) or 'first_name'
+            (players only, a last resort for players known by their first
+            name, like 'Juancho'; several players sharing it is 'ambiguous').
     candidates: [(id, name), ...] sorted by name.
     """
     query: str
@@ -111,6 +113,11 @@ def _entities_for(cursor, kind, normalized_names):
     return [tuple(row) for row in rows]
 
 
+def _players_by_first_name(cursor, first):
+    rows = cursor.execute("SELECT id, name FROM players ORDER BY name").fetchall()
+    return [(pid, name) for pid, name in rows if normalize_name(name).split(" ")[0] == first]
+
+
 def _resolve(kind, text, conn=None):
     own_connection = conn is None
     conn = conn or get_connection()
@@ -138,6 +145,10 @@ def _resolve(kind, text, conn=None):
                 closest = [alias for score, alias in scored if score >= best - 0.02]
                 found = _entities_for(cursor, kind, closest)
                 method = "fuzzy"
+
+        if not found and kind == "player" and " " not in normalized:
+            found = _players_by_first_name(cursor, normalized)
+            method = "first_name"
 
         if not found:
             return Resolution(text, "not_found")

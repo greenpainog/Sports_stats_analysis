@@ -124,8 +124,12 @@ class ResolveTests(unittest.TestCase):
         self.assertIsNone(result.id)
 
     def test_first_name_from_source_spelling_is_not_a_surname(self):
-        # 'NUNN, KENDRICK' must not make 'Kendrick' an alias.
-        self.assertEqual(resolve_player("Kendrick").status, "not_found")
+        # 'NUNN, KENDRICK' must not make 'Kendrick' an alias. It is only
+        # found by the first-name fallback, never as an exact alias.
+        result = resolve_player("Kendrick")
+        self.assertNotEqual(result.method, "exact")
+        if result.status == "match":
+            self.assertEqual((result.method, result.name), ("first_name", "Kendrick Nunn"))
 
     def test_unknown_names(self):
         self.assertEqual(resolve_team("Lakers").status, "not_found")

@@ -111,7 +111,7 @@ class Candidate(BaseModel):
 class ResolveResponse(BaseModel):
     query: str
     status: Literal["match", "ambiguous", "not_found"]
-    method: Optional[Literal["exact", "fuzzy"]] = None
+    method: Optional[Literal["exact", "fuzzy", "first_name"]] = None
     candidates: list[Candidate]
 
 
