@@ -22,7 +22,9 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from database.repositories import save_game_bundle
+from database.aliases import normalize_name, resolve_player
+from database.db import get_connection
+from database.repositories import link_source_id, save_game_bundle
 
 SOURCE = "esake"
 BASE_URL = "https://www.esake.gr/el/action/EsakegameView"
@@ -52,6 +54,48 @@ COLUMNS = ("points", "fg2", "fg3", "ft", "total_rebounds", "defensive_rebounds",
 HEADERS = ("P", "2PM-A", "3PM-A", "FTM-A", "REBS", "D.REBS", "O.REBS", "AST", "BLK", "BLK-A",
            "FOULS F", "FOULS M", "STL", "TO", "TIM.PL.", "RANK")
 TEAM_ROW, TOTAL_ROW = "ΟΜΑΔΙΚΑ - ΠΑΓΚΟΣ", "ΣΥΝΟΛΟ"
+
+# esake team id -> (English name, extra Latin aliases, Euroleague club code or None).
+# Pages name clubs in Greek capitals ("ΑΕΚ"); the alias resolver only keeps
+# Latin letters, so every club needs a Latin name. Clubs that also play in the
+# Euroleague are linked to that existing row (one Panathinaikos, not two).
+TEAMS = {
+    "00000001": ("Panathinaikos", [], "PAN"),
+    "00000002": ("Olympiacos", [], "OLY"),
+    "00000010": ("AEK Athens", ["AEK", "AEK BC"], None),
+    "00000005": ("Aris Thessaloniki", ["Aris"], None),
+    "0000000C": ("PAOK", ["PAOK Thessaloniki"], None),
+    "0000000D": ("Peristeri", ["Peristeri Betsson"], None),
+    "2A25C696": ("Promitheas Patras", ["Promitheas", "Promitheas Vikos Cola"], None),
+    "0000000A": ("Kolossos Rhodes", ["Kolossos", "Kolossos H Hotels"], None),
+    "0000000F": ("Maroussi", ["Marousi"], None),
+    "00000011": ("Iraklis Thessaloniki", ["Iraklis", "Heraklis"], None),
+    "B742845D": ("Karditsa", ["Karditsa Iaponiki"], None),
+    "BB4B460F": ("Mykonos", ["Mykonos Betsson"], None),
+    "3CA10C07": ("Doxa Lefkadas", ["Doxa", "Doxa Lefkadas Elabet"], None),
+    "0041ADCB": ("Vikos Falcons", ["Falcons"], None),
+}
+# esake championship id per season, from the results page's season list.
+CHAMPIONSHIPS = {"2026-27": "184645B9", "2025-26": "44B80BEB", "2024-25": "4820C134"}
+# esake player id -> Euroleague player id, for the same person spelled
+# differently (reviewed by hand after the first 2026-27 load). Not linked on
+# purpose: Zeb Jackson (not Edwin Jackson), Jordan Floyd (not Jordan Loyd).
+MANUAL_PLAYER_LINKS = {
+    "D8361DB3": "P004292",  # Vasilis / Vassilis Toliopoulos
+    "5AA30EE4": "P006085",  # Nenad / Neno Dimitrijevic
+    "32F994EF": "P012585",  # Matt / Matthew Morgan
+    "3793B035": "P012610",  # Tyson Ward (written with a Greek capital Tau on esake)
+    "8A20EF38": "P010091",  # Nikos / Nikolaos Plotas
+    "2C26B404": "P011085",  # Nikos / Nikolaos Rogkavopoulos
+    "4C0E5F4B": "P004451",  # Giannis / Ioannis Kouzeloglou
+    "7F6E6DE3": "P007866",  # Kostas / Konstantinos Mitoglou (found by the surname check)
+    "52ABD8D7": "P010042",  # Jean Claudio / Jean Montero
+}
+# Same surname, different people (reviewed): the Antetokounmpo and Kalaitzakis
+# brothers, and every common surname (Jones, Smith, Williams, Moore, ...).
+# Greek capitals that look like Latin ones. Pages sometimes mix them into
+# Latin text: "ΟΤ1" (overtime) and "ΤYSON WARD" both start with Greek letters.
+LOOKALIKES = str.maketrans("ΑΒΕΖΗΙΚΜΝΟΡΤΥΧ", "ABEZHIKMNOPTYX")
 
 
 # --- Download ----------------------------------------------------------------
@@ -161,9 +205,8 @@ def display_name(raw, surname):
     rest = words[len(surname_words):]
     while rest and rest[0].upper() in NAME_SUFFIXES:
         surname_words.append(rest.pop(0))
-    # str.title() capitalizes after an apostrophe too: "DE'VION" -> "De'Vion" (straight or curly ’).
-    pretty = [w if w.upper() in NAME_SUFFIXES else w.title() if ("'" in w or "’" in w) else w.capitalize()
-              for w in rest + surname_words]
+    # str.title() also capitalizes after an apostrophe or hyphen: De'Vion, Mitrou-Long.
+    pretty = [w if w.upper() in NAME_SUFFIXES else w.title() for w in rest + surname_words]
     return " ".join(pretty)
 
 
@@ -215,8 +258,8 @@ def _parse_box(rows, team_name, team_id):
             player_cell = row[0]
             match = re.search(r"idplayer=(\w+)", player_cell["href"] or "")
             number = re.match(r"#(\d+)", label)
-            raw = re.sub(r"^#\d+\s*", "", label)
-            surname = " ".join((player_cell["span"] or raw.split()[0]).split())
+            raw = re.sub(r"^#\d+\s*", "", label).translate(LOOKALIKES)
+            surname = " ".join((player_cell["span"] or raw.split()[0]).translate(LOOKALIKES).split())
             box.players.append(Line(_line(row[1:]), name=display_name(raw, surname), raw_name=raw,
                                     number=number.group(1) if number else None,
                                     source_player_id=match.group(1) if match else None))
@@ -257,7 +300,7 @@ def parse_game_page(html, idgame, season):
     parser = _Tables()
     parser.feed(html)
     quarters = [(_number(_text(r[0])), _number(_text(r[2]))) for r in parser.tables[0]
-                if len(r) == 3 and re.fullmatch(r"(Q\d|OT\d?|ΠΑΡ\d?)", _text(r[1]))]
+                if len(r) == 3 and re.fullmatch(r"(Q\d|OT\d?)", _text(r[1]).translate(LOOKALIKES))]
     boxes = [t for t in parser.tables if len(t) > 2 and _text(t[1][0]) == "ΠΑΙΚΤΗΣ"]
     if len(boxes) != 2:
         raise ValueError(f"Game {idgame}: expected 2 box score tables, found {len(boxes)}.")
@@ -348,10 +391,8 @@ def build_game_bundle(game, season):
         "source_game_id": game.idgame,
         "competition": COMPETITION,
         "season": {"name": season},
-        "home_team": {"name": game.home.name, "source_team_id": game.home.source_team_id,
-                      "aliases": [game.home.name]},
-        "away_team": {"name": game.away.name, "source_team_id": game.away.source_team_id,
-                      "aliases": [game.away.name]},
+        "home_team": _team(game.home),
+        "away_team": _team(game.away),
         "start_time": game.start_time,
         "round_number": game.round_number,
         "phase": "regular_season",
@@ -364,18 +405,197 @@ def build_game_bundle(game, season):
     }
 
 
+def _team(box):
+    if box.source_team_id not in TEAMS:
+        raise ValueError(f"Unknown esake team {box.source_team_id} ({box.name}): add it to TEAMS.")
+    name, aliases, _ = TEAMS[box.source_team_id]
+    return {"name": name, "source_team_id": box.source_team_id, "aliases": aliases}
+
+
+# --- Linking to rows from other sources --------------------------------------------
+
+def link_teams(conn):
+    """Link the Greek clubs that also play in the Euroleague to their Euroleague rows."""
+    cursor = conn.cursor()
+    for esake_id, (_, _, euroleague_code) in TEAMS.items():
+        if euroleague_code is None:
+            continue
+        row = cursor.execute("SELECT id FROM teams WHERE source = 'euroleague' AND source_team_id = ?",
+                             (euroleague_code,)).fetchone()
+        if row is None:
+            raise ValueError(f"No Euroleague team {euroleague_code} to link esake team {esake_id} to.")
+        link_source_id(cursor, "team", SOURCE, esake_id, row[0], "manual")
+    conn.commit()
+
+
+def link_players(conn, bundle):
+    """Link this game's new esake players to existing players from other sources.
+
+    A link is made only when the esake name exactly matches one player (by
+    name or by a full-name alias such as 'NUNN, KENDRICK'). Returns
+    (linked, review): linked = [(esake name, player name)], review = esake
+    players left unlinked although a similar name exists (a different spelling
+    such as Kostas/Konstantinos); add those to MANUAL_PLAYER_LINKS if they match.
+    """
+    cursor = conn.cursor()
+    linked, review = [], []
+    for appearance in bundle["appearances"]:
+        player = appearance["player"]
+        esake_id = player["source_player_id"]
+        known = cursor.execute(
+            """SELECT 1 FROM source_links WHERE kind = 'player' AND source = ? AND source_id = ?
+               UNION SELECT 1 FROM players WHERE source = ? AND source_player_id = ?""",
+            (SOURCE, esake_id, SOURCE, esake_id)).fetchone()
+        if known:
+            continue
+        if esake_id in MANUAL_PLAYER_LINKS:
+            target = cursor.execute("SELECT id FROM players WHERE source = 'euroleague' AND source_player_id = ?",
+                                    (MANUAL_PLAYER_LINKS[esake_id],)).fetchone()
+            if target is None:
+                raise ValueError(f"MANUAL_PLAYER_LINKS: no Euroleague player {MANUAL_PLAYER_LINKS[esake_id]}.")
+            link_source_id(cursor, "player", SOURCE, esake_id, target[0], "manual")
+            continue
+        names = {normalize_name(player["name"]), *(normalize_name(a) for a in player.get("aliases", []))}
+        marks = ", ".join("?" for _ in names)
+        matches = cursor.execute(
+            f"""SELECT DISTINCT p.id, p.name FROM players p JOIN player_aliases a ON a.player_id = p.id
+                WHERE p.source <> ? AND a.normalized IN ({marks})""",
+            (SOURCE, *names)).fetchall()
+        if len(matches) == 1:
+            link_source_id(cursor, "player", SOURCE, esake_id, matches[0][0], "name")
+            linked.append((player["name"], matches[0][1]))
+        else:
+            # Not linked. Flag it if a similar name exists, including the same
+            # surname: "Kostas" vs "Konstantinos" Mitoglou is too far apart for
+            # the fuzzy check, and a missed link makes the name ambiguous.
+            similar = resolve_player(player["name"], conn)
+            candidates = {name for _, name in similar.candidates} if similar.status != "not_found" else set()
+            surname = normalize_name(player["name"]).split()[-1:]
+            candidates |= {row[0] for row in cursor.execute(
+                """SELECT DISTINCT p.name FROM players p JOIN player_aliases a ON a.player_id = p.id
+                   WHERE p.source <> ? AND a.normalized = ?""", (SOURCE, *surname))} if surname else set()
+            if candidates:
+                review.append((player["name"], esake_id, sorted(candidates)))
+    conn.commit()
+    return linked, review
+
+
+# --- Loading ------------------------------------------------------------------------
+
 def ingest_game(idgame, season, download=True):
+    """Save one game (linking its players first). Returns (game id, linked, review)."""
     html = fetch_game_page(idgame, download)
-    return save_game_bundle(build_game_bundle(parse_game_page(html, idgame, season), season))
+    bundle = build_game_bundle(parse_game_page(html, idgame, season), season)
+    conn = get_connection()
+    try:
+        link_teams(conn)
+        linked, review = link_players(conn, bundle)
+    finally:
+        conn.close()
+    return save_game_bundle(bundle), linked, review
+
+
+def _round_page(championship, series, download=True):
+    """A round's game list, saved as results_<championship>_r<NN>.html.
+
+    A saved page is downloaded again only while it lists a game that has
+    started more than 3 hours ago but has no score yet.
+    """
+    global _last_request_time
+    path = RAW_DIR / f"results_{championship}_r{series:02d}.html"
+    stale = path.exists() and any(
+        g["start_passed"] and g["score"] is None for g in list_games(path.read_text(encoding="utf-8"), None))
+    if (not path.exists() or stale) and download:
+        wait = SECONDS_BETWEEN_REQUESTS - (time.monotonic() - _last_request_time)
+        if wait > 0:
+            time.sleep(wait)
+        response = requests.get("https://www.esake.gr/el/action/EsakeResults", timeout=60, params={
+            "idchampionship": championship, "idteam": "", "idseason": "", "series": f"{series:02d}"})
+        _last_request_time = time.monotonic()
+        response.raise_for_status()
+        RAW_DIR.mkdir(parents=True, exist_ok=True)
+        partial = path.with_suffix(".part")
+        partial.write_bytes(response.content)
+        partial.replace(path)
+    if not path.exists():
+        raise FileNotFoundError(f"{path} is not cached and download=False.")
+    return path.read_text(encoding="utf-8")
+
+
+def list_games(html, season):
+    """[{idgame, score (home, away) or None, start_passed}] for the games on a round page.
+
+    start_passed is True when the game started more than 3 hours ago (so a
+    score is final, not a game in progress). With season None it is judged
+    from the page's own month/year heading.
+    """
+    games = []
+    for block in html.split('<div class="esake-program-game">')[1:]:
+        game_id = re.search(r"EsakegameView\?idgame=(\w+)", block)
+        if not game_id:
+            continue
+        score = re.search(r"(\d+)&nbsp;-&nbsp;(\d+)", block)
+        when = re.search(r"clock\.svg[^>]*>\s*(\S+ \d{1,2} \S+) - (\d{1,2}:\d{2})", block)
+        start_passed = False
+        if when:
+            start_season = season or _season_from_page(html)
+            start = datetime.strptime(_start_time(when.group(1), when.group(2), start_season), "%Y-%m-%dT%H:%M:%SZ")
+            now = datetime.now(ZoneInfo("UTC")).replace(tzinfo=None)
+            start_passed = (now - start).total_seconds() > 3 * 3600
+        games.append({"idgame": game_id.group(1),
+                      "score": (int(score.group(1)), int(score.group(2))) if score else None,
+                      "start_passed": start_passed})
+    return games
+
+
+def _season_from_page(html):
+    banner = re.search(r"Stoiximan GBL (\d{4})-(\d{4})", html)
+    return f"{banner.group(1)}-{banner.group(2)[2:]}"
+
+
+def ingest_season(season, download=True, verbose=True, max_rounds=40):
+    """Load every finished game of a season, round by round, until a round has none.
+
+    Returns a report dict: saved, skipped (not finished), failed, linked, review.
+    """
+    championship = CHAMPIONSHIPS[season]
+    report = {"saved": 0, "skipped": 0, "failed": [], "linked": [], "review": []}
+    for series in range(1, max_rounds + 1):
+        games = list_games(_round_page(championship, series, download), season)
+        finished = [g for g in games if g["score"] is not None and g["start_passed"]]
+        report["skipped"] += len(games) - len(finished)
+        for g in finished:
+            try:
+                _, linked, review = ingest_game(g["idgame"], season, download)
+                report["saved"] += 1
+                report["linked"] += linked
+                report["review"] += review
+            except Exception as exc:  # keep going; report at the end
+                report["failed"].append((g["idgame"], f"{type(exc).__name__}: {exc}"))
+        if verbose:
+            print(f"round {series:02d}: {len(finished)} finished of {len(games)}", flush=True)
+        if not finished:
+            break  # the first round with no finished games ends the season so far
+    return report
 
 
 def main():
     parser = argparse.ArgumentParser(description="Load Greek Basket League games from esake.gr.")
-    parser.add_argument("--game", required=True, help="esake game id, e.g. 51FB1AFE")
-    parser.add_argument("--season", required=True, help="Season, e.g. 2026-27 (the page has no year)")
+    parser.add_argument("--season", required=True, help="Season, e.g. 2026-27 (the pages have no year)")
+    parser.add_argument("--game", help="One esake game id, e.g. 51FB1AFE; omit to load the whole season")
     args = parser.parse_args()
-    game_id = ingest_game(args.game, args.season)
-    print(f"Saved esake game {args.game} as games.id={game_id}")
+    if args.game:
+        game_id, linked, review = ingest_game(args.game, args.season)
+        print(f"Saved esake game {args.game} as games.id={game_id}; linked {linked}; review {review}")
+        return
+    report = ingest_season(args.season)
+    print(f"Saved {report['saved']}, not finished {report['skipped']}, failed {len(report['failed'])}")
+    for item in report["failed"]:
+        print("FAILED", *item)
+    for item in report["linked"]:
+        print("LINKED", *item)
+    for item in report["review"]:
+        print("REVIEW", *item)
 
 
 if __name__ == "__main__":
