@@ -3,7 +3,7 @@ import pytest
 
 import database.db as db
 from api.models import QuerySpec
-from eval.run_eval import load_questions, score
+from eval.run_eval import gold_ranking, load_questions, score
 from llm.question_parser import ParseResult
 from tests.test_stat_query import build_test_league
 
@@ -13,7 +13,9 @@ def test_eval_set_is_well_formed():
     assert len(questions) >= 50
     assert len({q["id"] for q in questions}) == len(questions)
     for q in questions:
-        if q["gold"] is not None:
+        if q["gold"] is not None and "ranking" in q["gold"]:
+            gold_ranking(q["gold"])  # raises if a gold ranking request is invalid
+        elif q["gold"] is not None:
             QuerySpec(**q["gold"])  # raises if a gold spec is invalid
     assert sum(q["gold"] is None for q in questions) >= 5  # some must be unanswerable
 

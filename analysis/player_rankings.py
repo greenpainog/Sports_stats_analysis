@@ -20,7 +20,7 @@ from analysis.advanced import (
     count_in_game,
     player_advanced_value,
 )
-from analysis.rankings import RESULTS, _rank, _totals
+from analysis.rankings import ORDERS, RESULTS, _rank, _totals
 from analysis.stat_query import (
     COUNTING_STATS,
     PERCENTAGE_STATS,
@@ -81,6 +81,7 @@ def player_rankings(
     min_games=None,
     min_minutes=None,
     limit=None,
+    order="highest",
 ):
     """Rank every player with enough matching games.
 
@@ -91,7 +92,10 @@ def player_rankings(
     min_games: games needed to be ranked; None = automatic (see module doc).
     min_minutes: minutes per game needed to be ranked.
     limit: return only the first N rows (ranks are still out of everyone ranked).
+    order: "highest" (rank 1 = highest value, the default) or "lowest".
     """
+    if order not in ORDERS:
+        raise QueryError("order must be 'highest' or 'lowest'.")
     all_stats = not stats
     stats = list(stats) if stats else list(RANKABLE_PLAYER_STATS)
     unknown = [s for s in stats if s not in RANKABLE_PLAYER_STATS]
@@ -216,12 +220,14 @@ def player_rankings(
 
     ranked = [row for row in rows if row.qualified]
     for stat in stats:
-        _rank(ranked, stat)
+        _rank(ranked, stat, order)
     for row in rows:
         for stat in stats:
             row.ranks.setdefault(stat, None)  # below the minimum: values but no rank
     first = stats[0]
     ranked.sort(key=lambda r: (r.ranks[first] is None, r.ranks[first] or 0, r.player))
+    if order == "lowest":
+        filters["order"] = "lowest"
     return PlayerRankings(stats=stats, filters=filters, per=per, min_games=needed,
                           players=ranked[:limit] if limit is not None else ranked,
                           ranked_count=len(ranked), unranked=len(rows) - len(ranked),

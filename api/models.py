@@ -244,6 +244,11 @@ class AskResponse(BaseModel):
     message: str
     spec: Optional[QuerySpec] = Field(None, description="The structured query the question was turned into.")
     result: Optional[QueryResponse] = None
+    ranking_kind: Optional[Literal["team_rankings", "matchup", "player_rankings", "player_profile"]] = Field(
+        None, description="Set for ranking questions instead of spec/result.")
+    ranking_spec: Optional[dict] = Field(None, description="The ranking request the question was turned into.")
+    ranking_result: Optional[
+        "RankingsResponse | MatchupResponse | PlayerRankingsResponse | PlayerProfileResponse"] = None
     candidates: list[Candidate] = []
 
 
@@ -272,6 +277,9 @@ class RankingSpec(BaseModel):
     )
     last_n: Optional[int] = Field(None, ge=1, le=100, description="Each team's N most recent matching games.")
     per: Literal["game", "total"] = Field("game", description="Per-game averages or season totals.")
+    order: Literal["highest", "lowest"] = Field(
+        "highest", description="'lowest' makes rank 1 the lowest value, e.g. fewest turnovers."
+    )
     side: Literal["team", "opponent"] = Field(
         "team", description="'opponent' ranks what teams allowed, e.g. points conceded."
     )
@@ -347,6 +355,9 @@ class PlayerRankingSpec(BaseModel):
     )
     min_minutes: Optional[float] = Field(None, ge=0, le=40, description="Minutes per game needed to be ranked.")
     limit: Optional[int] = Field(50, ge=1, le=500, description="Rows returned; ranks are still out of everyone ranked.")
+    order: Literal["highest", "lowest"] = Field(
+        "highest", description="'lowest' makes rank 1 the lowest value, e.g. fewest turnovers."
+    )
 
     @model_validator(mode="after")
     def check_stats(self):
@@ -391,3 +402,6 @@ class PlayerProfileResponse(BaseModel):
     ranked_count: int
     player: PlayerRankingRow
     answer: str
+
+
+AskResponse.model_rebuild()  # resolve the ranking response types defined above

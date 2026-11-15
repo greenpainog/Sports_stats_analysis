@@ -43,7 +43,7 @@
 {"id": "q43", "category": "name_variants", "question": "Pana's blocks at home", "gold": {"stats": ["blocks"], "team": "Panathinaikos AKTOR Athens", "venue": "home"}}
 {"id": "q44", "category": "name_variants", "question": "Sergio Lul 3-point % vs Barca", "gold": {"stats": ["fg3_pct"], "player": "Sergio Llull", "opponent": "FC Barcelona"}}
 {"id": "q45", "category": "unanswerable", "question": "How many points did LeBron James score in the NBA finals?", "gold": null}
-{"id": "q46", "category": "unanswerable", "question": "Who scored the most points in the EuroLeague this season?", "gold": null}
+{"id": "q46", "category": "ranking", "question": "Who scored the most points in the EuroLeague this season?", "gold": {"ranking": {"kind": "player_rankings", "stats": ["points"], "per": "total", "season": "2026-27"}}}
 {"id": "q47", "category": "unanswerable", "question": "Who will win the EuroLeague this year?", "gold": null}
 {"id": "q48", "category": "unanswerable", "question": "What's Kendrick Nunn's salary?", "gold": null}
 {"id": "q49", "category": "unanswerable", "question": "Is Nunn or Larkin the better shooter?", "gold": null}
@@ -62,3 +62,15 @@
 {"id": "a62", "category": "seasons", "question": "Real Madrid's record the past two seasons", "gold": {"stats": ["win_pct"], "team": "Real Madrid", "seasons": ["2025-26", "2026-27"]}}
 {"id": "a63", "category": "against_player", "question": "Fournier 3P% when facing Nunn this season and last", "gold": {"stats": ["fg3_pct"], "player": "Evan Fournier", "against_player": "Kendrick Nunn", "seasons": ["2025-26", "2026-27"]}}
 {"id": "a64", "category": "seasons", "question": "Larkin's points in 2024-25 and 2025-26 combined", "gold": {"stats": ["points"], "player": "Shane Larkin", "seasons": ["2024-25", "2025-26"]}}
+{"id": "r65", "category": "ranking", "question": "Where does Panathinaikos rank in free throws made per game this season?", "gold": {"ranking": {"kind": "team_rankings", "team": "Panathinaikos AKTOR Athens", "stats": ["ft_made"], "season": "2026-27"}}}
+{"id": "r66", "category": "ranking", "question": "Rank every Euroleague team by 3-point percentage this season", "gold": {"ranking": {"kind": "team_rankings", "stats": ["fg3_pct"], "season": "2026-27"}}}
+{"id": "r67", "category": "ranking", "question": "Panathinaikos vs Virtus Bologna full stats with ranks this season", "gold": {"ranking": {"kind": "matchup", "team": "Panathinaikos AKTOR Athens", "other_team": "Virtus Bologna", "season": "2026-27"}}}
+{"id": "r68", "category": "ranking", "question": "Which team allows the fewest points per game this season?", "gold": {"ranking": {"kind": "team_rankings", "stats": ["points"], "side": "opponent", "order": "lowest", "season": "2026-27"}}}
+{"id": "r69", "category": "ranking", "question": "Best offensive rating in games decided by 5 points or less this season", "gold": {"ranking": {"kind": "team_rankings", "stats": ["off_rating"], "max_margin": 5, "season": "2026-27"}}}
+{"id": "r70", "category": "ranking", "question": "Top 5 scorers this season", "gold": {"ranking": {"kind": "player_rankings", "stats": ["points"], "limit": 5, "season": "2026-27"}}}
+{"id": "r71", "category": "ranking", "question": "Who leads the Euroleague in usage rate this season?", "gold": {"ranking": {"kind": "player_rankings", "stats": ["usage_pct"], "season": "2026-27"}}}
+{"id": "r72", "category": "ranking", "question": "Where does Vezenkov rank in every stat this season?", "gold": {"ranking": {"kind": "player_profile", "player": "Sasha Vezenkov", "season": "2026-27"}}}
+{"id": "r73", "category": "ranking", "question": "Real Madrid players ranked by rebounds per game this season", "gold": {"ranking": {"kind": "player_rankings", "team": "Real Madrid", "stats": ["total_rebounds"], "season": "2026-27"}}}
+{"id": "r74", "category": "ranking", "question": "Most double-doubles last season", "gold": {"ranking": {"kind": "player_rankings", "stats": ["double_doubles"], "per": "total", "season": "2025-26"}}}
+{"id": "r75", "category": "ranking", "question": "Fenerbahce's rank in pace and net rating in away games this season", "gold": {"ranking": {"kind": "team_rankings", "team": "Fenerbahce Tarfin Istanbul", "stats": ["pace", "net_rating"], "venue": "away", "season": "2026-27"}}}
+{"id": "r76", "category": "ranking", "question": "Team turnovers per game in losses this season, fewest first", "gold": {"ranking": {"kind": "team_rankings", "stats": ["turnovers"], "result": "lost", "order": "lowest", "season": "2026-27"}}}

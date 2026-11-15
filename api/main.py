@@ -17,7 +17,7 @@ from analysis.stat_query import (
     RESULT_STATS,
     QueryError,
 )
-from api.service import answer_spec, matchup_spec, player_profile_spec, player_rankings_spec, rankings_spec
+from api.service import answer_ranking, answer_spec, matchup_spec, player_profile_spec, player_rankings_spec, rankings_spec
 from api.models import (
     AskRequest,
     AskResponse,
@@ -133,8 +133,9 @@ def get_llm():
 def ask(request: AskRequest, llm=Depends(get_llm)):
     """Answer a plain-language question.
 
-    The LLM turns the question into a QuerySpec; the spec is validated and run
-    exactly like POST /query. The LLM never writes SQL.
+    The LLM turns the question into a QuerySpec (or, for "who leads" and "where
+    does X rank" questions, a ranking request); it is validated and run exactly
+    like POST /query or the ranking endpoints. The LLM never writes SQL.
     """
     question = request.question
     parsed = parse_question(question, llm=llm)
@@ -144,6 +145,21 @@ def ask(request: AskRequest, llm=Depends(get_llm)):
         return JSONResponse(status_code=503, content=body.model_dump())
     if parsed.status in ("unanswerable", "invalid"):
         return AskResponse(question=question, status=parsed.status, message=parsed.reason)
+
+    if parsed.ranking is not None:
+        ranking = parsed.ranking
+        spec = {**ranking.spec.model_dump(exclude_none=True), **({"team": ranking.focus_team}
+                                                                if ranking.focus_team else {})}
+        try:
+            message, result = answer_ranking(ranking)
+        except QueryError as exc:
+            return AskResponse(
+                question=question, status="needs_clarification", message=str(exc),
+                ranking_kind=ranking.kind, ranking_spec=spec,
+                candidates=[{"id": i, "name": n} for i, n in exc.candidates],
+            )
+        return AskResponse(question=question, status="answered", message=message,
+                           ranking_kind=ranking.kind, ranking_spec=spec, ranking_result=result)
 
     try:
         result = answer_spec(parsed.spec)

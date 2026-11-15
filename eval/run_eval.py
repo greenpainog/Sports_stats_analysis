@@ -83,6 +83,60 @@ def normalized(spec: QuerySpec):
     return data
 
 
+def gold_ranking(gold):
+    """A gold {"ranking": {...}} entry -> RankingRequest (fields left out are null)."""
+    from llm.question_parser import LLMRanking, to_ranking
+
+    return to_ranking({**{name: None for name in LLMRanking.model_fields}, **gold["ranking"]})
+
+
+_RANK_NAMES = {"team": resolve_team, "team_a": resolve_team, "team_b": resolve_team, "player": resolve_player}
+
+
+def ranking_key(request):
+    """A ranking request with names resolved to ids, for 'spec exact'."""
+    data = {"kind": request.kind, **request.spec.model_dump()}
+    if request.focus_team is not None:
+        data["team"] = request.focus_team
+    for name, resolve in _RANK_NAMES.items():
+        if data.get(name) is not None:
+            match = resolve(data[name])
+            data[name] = match.id if match.status == "match" else data[name]
+    if data.get("stats"):
+        data["stats"] = sorted(data["stats"])
+    return data
+
+
+def run_ranking(request):
+    """The parts of a ranking answer that decide whether two requests agree."""
+    from api.service import answer_ranking
+
+    _, result = answer_ranking(request)
+    focus = resolve_team(request.focus_team).id if request.focus_team else None
+    return {"kind": request.kind, "focus": focus, "result": result.model_dump(exclude={"answer"})}
+
+
+def score_ranking(gold, parsed):
+    if parsed.ranking is None:
+        return False, False, "expected a ranking, got a single-subject spec"
+    expected_request = gold_ranking(gold)
+    exact = ranking_key(parsed.ranking) == ranking_key(expected_request)
+    try:
+        got = run_ranking(parsed.ranking)
+    except QueryError as exc:
+        return False, exact, f"query failed: {exc}"
+    expected = run_ranking(expected_request)
+    # "Who leads in steals" doesn't say how many players to list: compare the rows both show.
+    if got["kind"] == expected["kind"] == "player_rankings":
+        shown = min(len(got["result"]["players"]), len(expected["result"]["players"]))
+        for side in (got, expected):
+            side["result"]["players"] = side["result"]["players"][:shown]
+    if got == expected:
+        return True, exact, ""
+    diffs = [part for part in ("kind", "focus", "result") if got[part] != expected[part]]
+    return False, exact, "different " + ", ".join(diffs)
+
+
 def score(item, parsed):
     """Return (correct, spec_exact, note) for one question."""
     gold = item["gold"]
@@ -91,6 +145,10 @@ def score(item, parsed):
         return ok, ok, "" if ok else f"expected unanswerable, got {parsed.status}"
     if parsed.status != "ok":
         return False, False, f"{parsed.status}: {parsed.reason}"
+    if "ranking" in gold:
+        return score_ranking(gold, parsed)
+    if parsed.spec is None:
+        return False, False, f"expected a single-subject spec, got ranking {parsed.ranking.kind}"
 
     gold_spec = QuerySpec(**gold)
     exact = normalized(parsed.spec) == normalized(gold_spec)
@@ -105,6 +163,14 @@ def score(item, parsed):
     return False, exact, "different " + ", ".join(diffs)
 
 
+def _predicted(parsed):
+    if parsed.ranking is not None:
+        r = parsed.ranking
+        return {"ranking": {"kind": r.kind, **r.spec.model_dump(exclude_defaults=True),
+                            **({"team": r.focus_team} if r.focus_team else {})}}
+    return parsed.spec.model_dump(exclude_defaults=True) if parsed.spec else None
+
+
 def check_gold(questions):
     """Every gold spec must be valid and run; prints how many games each matches."""
     problems = 0
@@ -112,6 +178,11 @@ def check_gold(questions):
         if item["gold"] is None:
             continue
         try:
+            if "ranking" in item["gold"]:
+                result = run_ranking(gold_ranking(item["gold"]))["result"]
+                rows = result.get("teams") or result.get("players") or [result.get("player") or result.get("team_a")]
+                print(f"{item['id']}  {item['gold']['ranking']['kind']:<15} {len(rows):>3} rows")
+                continue
             result = run_spec(QuerySpec(**item["gold"]))
             print(f"{item['id']}  {len(result['games']):>3} games  {result['subject']}")
         except Exception as exc:
@@ -151,8 +222,7 @@ def main(argv=None):
         by_category[item["category"]][0] += correct
         by_category[item["category"]][1] += 1
         rows.append({**item, "correct": correct, "spec_exact": exact, "note": note, "status": parsed.status,
-                     "attempts": parsed.attempts, "predicted": parsed.spec.model_dump(exclude_defaults=True)
-                     if parsed.spec else None, "reason": parsed.reason})
+                     "attempts": parsed.attempts, "predicted": _predicted(parsed), "reason": parsed.reason})
         print(f"{item['id']}  {'ok ' if correct else 'BAD'}  {item['question']}" + (f"  -> {note}" if note else ""))
 
     total = len(rows)

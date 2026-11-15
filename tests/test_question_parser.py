@@ -53,7 +53,7 @@ def parse(question, *outputs):
 # --- parse_question ----------------------------------------------------------
 
 def test_llm_schema_has_every_queryspec_field():
-    assert set(LLMQuerySpec.model_fields) == set(QuerySpec.model_fields) | {"answerable", "reason"}
+    assert set(LLMQuerySpec.model_fields) == set(QuerySpec.model_fields) | {"answerable", "reason", "ranking"}
     from api.models import CompareSide, PlayerThreshold
     from llm.question_parser import LLMPlayerThreshold
     assert set(LLMCompareSide.model_fields) == set(CompareSide.model_fields)
@@ -169,3 +169,72 @@ def test_empty_compare_side_is_retried():
     )
     assert result.status == "ok" and result.attempts == 2
     assert [label for label, _ in result.spec.side_specs()] == ["home", "away"]
+
+
+# --- Ranking questions ---------------------------------------------------------
+
+from llm.question_parser import LLMRanking  # noqa: E402
+
+
+def ranking(**fields):
+    """An LLMRanking with every field empty except the ones given."""
+    base = {name: None for name in LLMRanking.model_fields}
+    base.update(fields)
+    return LLMRanking(**base)
+
+
+def test_ranking_output_becomes_a_ranking_request():
+    result, _ = parse("Who leads in assists?", llm_output(ranking=ranking(kind="player_rankings", stats=["assists"])))
+    assert result.status == "ok" and result.spec is None
+    assert result.ranking.kind == "player_rankings" and result.ranking.spec.limit == 10  # default for /ask
+    result, _ = parse("Where does Alpha rank in rebounds?", llm_output(
+        ranking=ranking(kind="team_rankings", team="Alpha", stats=["total_rebounds"])))
+    assert (result.ranking.focus_team, result.ranking.spec.stats) == ("Alpha", ["total_rebounds"])
+
+
+def test_a_field_the_kind_doesnt_use_is_retried():
+    result, llm = parse(
+        "Alpha vs Beta",
+        llm_output(ranking=ranking(kind="matchup", team="Alpha", player="Shooter")),  # no other_team; player
+        llm_output(ranking=ranking(kind="matchup", team="Alpha", other_team="Beta")),
+    )
+    assert result.status == "ok" and result.attempts == 2 and result.ranking.spec.team_b == "Beta"
+    assert "does not use: player" in llm.calls[1][1][2]["content"]
+
+
+def test_per40_is_rejected_for_teams():
+    bad = llm_output(ranking=ranking(kind="team_rankings", per="per40"))
+    result, _ = parse("team points per 40", bad, bad)
+    assert result.status == "invalid" and "players only" in result.reason
+
+
+def test_ask_where_does_a_team_rank(ask):
+    body = ask("Where does Alpha rank in rebounds?", llm_output(
+        ranking=ranking(kind="team_rankings", team="alpha", stats=["total_rebounds"], season="2024-25"))).json()
+    assert body["status"] == "answered" and body["ranking_kind"] == "team_rankings"
+    assert "Alpha (4 games)" in body["message"] and "31.5 (#1/3)" in body["message"]
+    assert body["ranking_spec"]["team"] == "alpha" and len(body["ranking_result"]["teams"]) == 3
+
+
+def test_ask_full_table_and_lowest_first(ask):
+    body = ask("Fewest rebounds?", llm_output(
+        ranking=ranking(kind="team_rankings", stats=["total_rebounds"], season="2024-25", order="lowest"))).json()
+    lines = body["message"].splitlines()
+    assert lines[1].strip() == "1. Beta  25.5" and lines[3].strip() == "3. Alpha  31.5"
+
+
+def test_ask_player_leaders_and_profile(ask):
+    body = ask("Assist leaders", llm_output(
+        ranking=ranking(kind="player_rankings", stats=["assists"], season="2024-25"))).json()
+    assert "1. Sam Shooter (Alpha)  4.0  [3 games]" in body["message"]
+    body = ask("Shooter's ranks", llm_output(
+        ranking=ranking(kind="player_profile", player="Shooter", stats=["assists"], season="2024-25"))).json()
+    assert body["ranking_kind"] == "player_profile" and "4.0 (#1/2)" in body["message"]
+
+
+def test_ask_ranking_with_unknown_team_needs_clarification(ask):
+    body = ask("Where does Omega rank?", llm_output(
+        ranking=ranking(kind="team_rankings", team="Omega", stats=["total_rebounds"]))).json()
+    assert body["status"] == "needs_clarification" and "Omega" in body["message"]
+    body = ask("Kick's ranks", llm_output(ranking=ranking(kind="player_profile", player="Kick"))).json()
+    assert body["status"] == "needs_clarification" and len(body["candidates"]) == 2

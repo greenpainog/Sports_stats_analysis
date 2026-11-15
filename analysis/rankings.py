@@ -33,6 +33,7 @@ RANKABLE_TEAM_STATS = TEAM_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS + tupl
 RESULTS = ("won", "lost")
 SIDES = ("team", "opponent")
 PER = ("game", "total")
+ORDERS = ("highest", "lowest")
 DECIMALS = 1  # values are ranked as shown, so 15.7 and 15.7 tie
 
 
@@ -83,9 +84,14 @@ class _Zero(dict):
         return 0
 
 
-def _rank(rows, stat):
-    """Competition ranking (1, 2, 2, 4) on the shown value; teams with no value get None."""
-    ordered = sorted((r for r in rows if r.values[stat] is not None), key=lambda r: -r.values[stat])
+def _rank(rows, stat, order="highest"):
+    """Competition ranking (1, 2, 2, 4) on the shown value; teams with no value get None.
+
+    order "highest": rank 1 is the highest value; "lowest": rank 1 is the lowest
+    (fewest turnovers, best defensive rating).
+    """
+    sign = -1 if order == "highest" else 1
+    ordered = sorted((r for r in rows if r.values[stat] is not None), key=lambda r: sign * r.values[stat])
     for position, row in enumerate(ordered, 1):
         previous = ordered[position - 2] if position > 1 else None
         same = previous is not None and previous.values[stat] == row.values[stat]
@@ -104,6 +110,7 @@ def team_rankings(
     last_n=None,
     per="game",
     side="team",
+    order="highest",
 ):
     """Rank every team that has matching games.
 
@@ -114,7 +121,10 @@ def team_rankings(
     per: "game" (per-game average) or "total". Percentages ignore it.
     side: "team" for the team's own stats, "opponent" for what it allowed
         (e.g. points with side="opponent" are points conceded).
+    order: "highest" (rank 1 = highest value, the default) or "lowest".
     """
+    if order not in ORDERS:
+        raise QueryError("order must be 'highest' or 'lowest'.")
     all_stats = not stats
     stats = list(stats) if stats else [
         s for s in RANKABLE_TEAM_STATS if not (side == "opponent" and s == "win_pct")]
@@ -228,9 +238,11 @@ def team_rankings(
             row.values[stat] = _ranked_value(row.summary[stat], per)
         rows.append(row)
     for stat in stats:
-        _rank(rows, stat)
+        _rank(rows, stat, order)
     first = stats[0]
     rows.sort(key=lambda r: (r.ranks[first] is None, r.ranks[first] or 0, r.team))
+    if order == "lowest":
+        filters["order"] = "lowest"
     return Rankings(stats=stats, filters=filters, per=per, side=side, teams=rows)
 
 

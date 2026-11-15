@@ -122,6 +122,13 @@ shows one player's value and rank in all of them (`{"player": "Nunn", "season": 
 Only players with enough games are ranked: by default half the games of the most active player,
 rounded up (`min_games` overrides it). Use `min_minutes` for shooting stats, or low-volume players
 top them. Filters as for teams, plus `team`; `limit` (default 50) trims rows, not ranks.
+`order: "lowest"` (teams and players) makes rank 1 the lowest value, e.g. fewest turnovers.
+
+**Ranking questions in `/ask`.** "Where does Panathinaikos rank in FT made per game?", "who has the
+best defense?", "top 5 scorers", "Panathinaikos vs Virtus full stats" and "where does Vezenkov rank
+in every stat?" are turned into one of the four ranking requests above (`ranking_kind`,
+`ranking_spec` and `ranking_result` in the response). "The most assists" means season totals;
+"leads in"/"top scorers" means per game.
 
 The database path defaults to `data/sports_analytics.db` in the project folder;
 set the `SPORTS_DB_PATH` environment variable to use another file.
@@ -164,6 +171,6 @@ least one second apart. Data files, API keys and `.env` are never committed.
 2. Team/player alias tables and name resolution ✅ `database.aliases.resolve_team()` / `resolve_player()`
 3. Query layer (opponent, home/away, last N, opponent over .500, player absent) ✅ `analysis.stat_query.query_stats()`
 4. FastAPI + Pydantic `QuerySpec` API ✅ `api/` (`POST /query`, `GET /resolve/{kind}`, `GET /stats`)
-5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 64/64 and 12/12 held-out with gpt-6-luna on 2026-11-15
+5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 76/76 (13 ranking questions) and 12/12 held-out with gpt-6-luna on 2026-11-15
 6. Greek league ingestion
 7. Docker, demo, agent for multi-step questions, Azure deployment
