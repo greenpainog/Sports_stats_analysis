@@ -74,6 +74,9 @@ TEAMS = {
     "BB4B460F": ("Mykonos", ["Mykonos Betsson"], None),
     "3CA10C07": ("Doxa Lefkadas", ["Doxa", "Doxa Lefkadas Elabet"], None),
     "0041ADCB": ("Vikos Falcons", ["Falcons"], None),
+    # Only in older seasons:
+    "00000003": ("Panionios", ["Panionios Cosmorama Travel"], None),
+    "F7D46144": ("Lavrio", ["Lavrio DHI", "Lavrio Megabolt"], None),
 }
 # esake championship id per season, from the results page's season list.
 CHAMPIONSHIPS = {"2026-27": "184645B9", "2025-26": "44B80BEB", "2024-25": "4820C134"}
@@ -279,11 +282,25 @@ def _start_time(date_text, clock, season):
     return local.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _page_championship(html):
+    """The championship id (hex, as in CHAMPIONSHIPS) of a game page, or None.
+
+    Player links carry it in decimal minus 100,000,000 (checked on all three
+    seasons: 1052912363 = 0x44B80BEB - 10**8 for 2025-26).
+    """
+    found = set(re.findall(r"idchampionship=(\d+)", html))
+    if len(found) > 1:
+        raise ValueError(f"Page mixes championships {sorted(found)}.")
+    return f"{int(found.pop()) + 10**8:08X}" if found else None
+
+
 def parse_game_page(html, idgame, season):
     """Parse a saved EsakegameView mode=3 page. `season` is e.g. '2026-27' (the page has no year)."""
-    banner = re.search(r"Stoiximan GBL (\d{4})-(\d{4})", html)
-    if banner and f"{banner.group(1)}-{banner.group(2)[2:]}" != season:
-        raise ValueError(f"Page is for season {banner.group(1)}-{banner.group(2)}, not {season}.")
+    # The "Stoiximan GBL 2026-2027" banner is the site header (always the
+    # current season), so check the championship in the player links instead.
+    page_championship = _page_championship(html)
+    if page_championship is not None and page_championship != CHAMPIONSHIPS[season]:
+        raise ValueError(f"Game {idgame}: page is for championship {page_championship}, not {season}.")
     round_match = re.search(r"<h5>(\d+)η Αγωνιστική</h5>", html)
     date_match = re.search(r"clock2\.svg[^>]*><span>([^<]+)</span>\s*(\d{1,2}:\d{2})", html)
     venue_match = re.search(r"pin2\.svg[^>]*>([^<]+)</div>", html)
@@ -503,8 +520,9 @@ def _round_page(championship, series, download=True):
     """
     global _last_request_time
     path = RAW_DIR / f"results_{championship}_r{series:02d}.html"
+    season = next(s for s, c in CHAMPIONSHIPS.items() if c == championship)
     stale = path.exists() and any(
-        g["start_passed"] and g["score"] is None for g in list_games(path.read_text(encoding="utf-8"), None))
+        g["start_passed"] and g["score"] is None for g in list_games(path.read_text(encoding="utf-8"), season))
     if (not path.exists() or stale) and download:
         wait = SECONDS_BETWEEN_REQUESTS - (time.monotonic() - _last_request_time)
         if wait > 0:
@@ -526,8 +544,8 @@ def list_games(html, season):
     """[{idgame, score (home, away) or None, start_passed}] for the games on a round page.
 
     start_passed is True when the game started more than 3 hours ago (so a
-    score is final, not a game in progress). With season None it is judged
-    from the page's own month/year heading.
+    score is final, not a game in progress). `season` gives the year, since
+    the page shows only day and month.
     """
     games = []
     for block in html.split('<div class="esake-program-game">')[1:]:
@@ -538,19 +556,13 @@ def list_games(html, season):
         when = re.search(r"clock\.svg[^>]*>\s*(\S+ \d{1,2} \S+) - (\d{1,2}:\d{2})", block)
         start_passed = False
         if when:
-            start_season = season or _season_from_page(html)
-            start = datetime.strptime(_start_time(when.group(1), when.group(2), start_season), "%Y-%m-%dT%H:%M:%SZ")
+            start = datetime.strptime(_start_time(when.group(1), when.group(2), season), "%Y-%m-%dT%H:%M:%SZ")
             now = datetime.now(ZoneInfo("UTC")).replace(tzinfo=None)
             start_passed = (now - start).total_seconds() > 3 * 3600
         games.append({"idgame": game_id.group(1),
                       "score": (int(score.group(1)), int(score.group(2))) if score else None,
                       "start_passed": start_passed})
     return games
-
-
-def _season_from_page(html):
-    banner = re.search(r"Stoiximan GBL (\d{4})-(\d{4})", html)
-    return f"{banner.group(1)}-{banner.group(2)[2:]}"
 
 
 def ingest_season(season, download=True, verbose=True, max_rounds=40):

@@ -10,12 +10,22 @@ import pytest
 from ingestion.esake import (
     _greek_month,
     _minutes,
+    _page_championship,
     _start_time,
     build_game_bundle,
     check_game,
     display_name,
     parse_game_page,
 )
+
+
+def test_page_championship_comes_from_player_links_not_the_banner():
+    link = '<a href="/el/action/EsakeplayerView?idplayer=X&mode=1&idteam=1&idchampionship={}">'
+    page = "Stoiximan GBL 2026-2027" + link.format(1052912363) * 2
+    assert _page_championship(page) == "44B80BEB"  # 2025-26
+    assert _page_championship("no links") is None
+    with pytest.raises(ValueError):
+        _page_championship(link.format(1052912363) + link.format(307258553))
 
 
 def test_display_name():
