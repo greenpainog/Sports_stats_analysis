@@ -1,8 +1,18 @@
 """Run a validated QuerySpec, including comparisons. Used by /query, /ask and the eval."""
 from dataclasses import asdict
 
+from analysis.rankings import matchup, team_rankings
 from analysis.stat_query import query_stats
-from api.models import ComparisonSide, QueryResponse, QuerySpec
+from api.models import (
+    ComparisonSide,
+    MatchupResponse,
+    MatchupSpec,
+    QueryResponse,
+    QuerySpec,
+    RankingRow,
+    RankingSpec,
+    RankingsResponse,
+)
 
 
 def _run(spec: QuerySpec) -> QueryResponse:
@@ -52,3 +62,40 @@ def answer_spec(spec: QuerySpec) -> QueryResponse:
         ]
         response.answer = comparison_text(response, response.comparison)
     return response
+
+
+# --- Rankings ----------------------------------------------------------------
+
+def _row(row) -> RankingRow:
+    return RankingRow(team=row.team, games=row.games, values=row.values, ranks=row.ranks,
+                      summary={stat: asdict(s) for stat, s in row.summary.items()})
+
+
+def rankings_spec(spec: RankingSpec) -> RankingsResponse:
+    r = team_rankings(**spec.model_dump())
+    return RankingsResponse(stats=r.stats, filters=r.filters, per=r.per, side=r.side,
+                            team_count=len(r.teams), teams=[_row(row) for row in r.teams])
+
+
+def _cell(value, rank, count):
+    shown = "-" if value is None else f"{value:.1f}"
+    return f"{shown} (#{rank}/{count})" if rank is not None else shown
+
+
+def matchup_text(m) -> str:
+    count = len(m.rankings.teams)
+    a, b = m.team_a, m.team_b
+    width = max(len(stat) for stat in m.rankings.stats)
+    lines = [f"{a.team} ({a.games} games) vs {b.team} ({b.games} games), ranks out of {count} teams:"]
+    for stat in m.rankings.stats:
+        lines.append(f"  {stat:<{width}}  {_cell(a.values[stat], a.ranks[stat], count):>16}"
+                     f"  {_cell(b.values[stat], b.ranks[stat], count):>16}")
+    return "\n".join(lines)
+
+
+def matchup_spec(spec: MatchupSpec) -> MatchupResponse:
+    filters = spec.model_dump(exclude={"team_a", "team_b"})
+    m = matchup(spec.team_a, spec.team_b, **filters)
+    r = m.rankings
+    return MatchupResponse(stats=r.stats, filters=r.filters, per=r.per, side=r.side, team_count=len(r.teams),
+                           team_a=_row(m.team_a), team_b=_row(m.team_b), answer=matchup_text(m))

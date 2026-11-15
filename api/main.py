@@ -17,13 +17,17 @@ from analysis.stat_query import (
     RESULT_STATS,
     QueryError,
 )
-from api.service import answer_spec
+from api.service import answer_spec, matchup_spec, rankings_spec
 from api.models import (
     AskRequest,
     AskResponse,
     ErrorResponse,
+    MatchupResponse,
+    MatchupSpec,
     QueryResponse,
     QuerySpec,
+    RankingSpec,
+    RankingsResponse,
     ResolveResponse,
 )
 from database.aliases import resolve_player, resolve_team
@@ -81,6 +85,22 @@ def resolve(kind: Literal["team", "player"], name: str = Query(min_length=1)):
 def run_query(spec: QuerySpec):
     """Answer one QuerySpec: the matching games plus a summary per stat (and per side, with compare)."""
     return answer_spec(spec)
+
+
+@app.post("/rankings", response_model=RankingsResponse)
+def rankings(spec: RankingSpec):
+    """Every team's value and rank for each stat, e.g. free throws made per game this season."""
+    return rankings_spec(spec)
+
+
+@app.post(
+    "/matchup",
+    response_model=MatchupResponse,
+    responses={400: {"model": ErrorResponse, "description": "Unknown or ambiguous team, or no games"}},
+)
+def team_matchup(spec: MatchupSpec):
+    """Two teams side by side with their league rank for every stat, e.g. before they play each other."""
+    return matchup_spec(spec)
 
 
 @lru_cache

@@ -10,6 +10,7 @@ from typing import Annotated, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 
+from analysis.rankings import RANKABLE_TEAM_STATS
 from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS, RESULT_STATS
 
 # Literal[...] from the tuples gives the JSON schema an exact list of allowed
@@ -245,3 +246,73 @@ class AskResponse(BaseModel):
 
 
 QueryResponse.model_rebuild()  # resolve the forward reference to ComparisonSide
+
+
+# --- Rankings ----------------------------------------------------------------
+
+TeamStatName = Literal[RANKABLE_TEAM_STATS]
+
+
+class RankingSpec(BaseModel):
+    """Rank every team on its stats, over the games that match the filters."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stats: Optional[list[TeamStatName]] = Field(
+        None, min_length=1, description="Stats to rank on; null means every team stat. Rows are sorted by the first."
+    )
+    season: Optional[SeasonName] = Field(None, description="Season such as '2026-27'; null means all loaded seasons.")
+    phase: Optional[Phase] = None
+    venue: Optional[Venue] = Field(None, description="Only each team's home (or away, neutral) games.")
+    result: Optional[Literal["won", "lost"]] = Field(None, description="Only the games each team won (or lost).")
+    max_margin: Optional[int] = Field(
+        None, ge=1, le=50, description="Only games decided by at most this many points, e.g. 5 for close games."
+    )
+    last_n: Optional[int] = Field(None, ge=1, le=100, description="Each team's N most recent matching games.")
+    per: Literal["game", "total"] = Field("game", description="Per-game averages or season totals.")
+    side: Literal["team", "opponent"] = Field(
+        "team", description="'opponent' ranks what teams allowed, e.g. points conceded."
+    )
+
+    @model_validator(mode="after")
+    def check_stats(self):
+        if self.stats and len(set(self.stats)) != len(self.stats):
+            raise ValueError("Each stat may be listed only once.")
+        if self.side == "opponent" and self.stats and "win_pct" in self.stats:
+            raise ValueError("win_pct is the team's own record; use side 'team'.")
+        return self
+
+
+class MatchupSpec(RankingSpec):
+    """Two teams side by side, each with its league rank for every stat."""
+
+    team_a: str = Field(description="First team, e.g. 'Panathinaikos'.")
+    team_b: str = Field(description="Second team, e.g. 'Virtus'.")
+
+
+class RankingRow(BaseModel):
+    team: str
+    games: int
+    values: dict[str, Optional[float]] = Field(description="Per game, total or percentage, as ranked.")
+    ranks: dict[str, Optional[int]] = Field(description="1 = highest value, also for turnovers and fouls.")
+    summary: dict[str, StatSummary]
+
+
+class RankingsResponse(BaseModel):
+    stats: list[str]
+    filters: dict
+    per: str
+    side: str
+    team_count: int
+    teams: list[RankingRow]
+
+
+class MatchupResponse(BaseModel):
+    stats: list[str]
+    filters: dict
+    per: str
+    side: str
+    team_count: int = Field(description="Ranks are out of this many teams.")
+    team_a: RankingRow
+    team_b: RankingRow
+    answer: str = Field(description="A readable side-by-side table.")

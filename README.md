@@ -92,6 +92,17 @@ counts either team, so teammates too). `seasons` takes several seasons at once, 
 ```
 `/ask` builds these from questions like "Panathinaikos turnovers when Nunn is out vs playing".
 
+**Team rankings.** `POST /rankings` ranks every team on each stat (all 23 team stats when `stats`
+is left out). `POST /matchup` puts two teams side by side with their league rank for every stat:
+
+```json
+{"team_a": "Panathinaikos", "team_b": "Virtus", "season": "2026-27"}
+```
+Filters: `season`, `phase`, `venue`, `result` (`won`/`lost`), `max_margin` (5 = games decided by
+5 or fewer), `last_n` (each team's own last N), `per` (`game`/`total`), and `side: "opponent"` for
+what teams allowed. Rank 1 is always the highest value, also for turnovers, fouls and points
+allowed; teams with the same shown value share a rank.
+
 The database path defaults to `data/sports_analytics.db` in the project folder;
 set the `SPORTS_DB_PATH` environment variable to use another file.
 
