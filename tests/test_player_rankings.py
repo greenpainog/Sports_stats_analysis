@@ -101,7 +101,8 @@ def _line(**v):
 
 
 PL = _line(minutes=30, fg2_made=5, fg2_attempted=10, fg3_made=2, fg3_attempted=5, ft_made=4, ft_attempted=5,
-           offensive_rebounds=2, defensive_rebounds=6, assists=5, turnovers=2, steals=1, blocks=1, points=20)
+           offensive_rebounds=2, defensive_rebounds=6, assists=5, turnovers=2, steals=1, blocks=1, points=20,
+           paint_points=8)
 TM = _line(minutes=200, fg2_made=25, fg2_attempted=50, fg3_made=10, fg3_attempted=30, ft_made=15, ft_attempted=20,
            offensive_rebounds=10, defensive_rebounds=25, assists=20, turnovers=12, points=95)
 OP = _line(fg2_made=24, fg2_attempted=48, fg3_made=9, fg3_attempted=27, ft_made=12, ft_attempted=16,
@@ -125,6 +126,7 @@ def test_player_formulas_match_hand_calculation():
         "pts_from_2pt_pct": 50.0,  # 10 of 20
         "pts_from_3pt_pct": 30.0,
         "pts_from_ft_pct": 20.0,
+        "pts_from_paint_pct": 40.0,  # 8 of 20
         "points_per_fga": 1.33,    # 20 / 15
         "fg3a_rate": 33.3,
         "ft_rate": 0.333,

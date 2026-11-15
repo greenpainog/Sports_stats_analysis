@@ -60,7 +60,7 @@ class ResolveTests(unittest.TestCase):
         db.DATABASE_FILE = str(Path(cls.tmp.name) / "names.db")
         create_tables()
         for gamecode in ROUND_ONE:
-            ingest_game("E", 2024, gamecode)
+            ingest_game("E", 2024, gamecode, download=False)
 
     @classmethod
     def tearDownClass(cls):

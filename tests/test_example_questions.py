@@ -67,7 +67,7 @@ class ExampleQuestionTests(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         db.DATABASE_FILE = str(Path(cls.tmp.name) / "season.db")
         create_tables()
-        failures = ingest_season("E", 2024, verbose=False)
+        failures = ingest_season("E", 2024, verbose=False, download=False)
         assert not failures, failures
 
     @classmethod

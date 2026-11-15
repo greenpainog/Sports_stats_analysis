@@ -28,6 +28,9 @@ COUNTING_STATS = (
     "offensive_rebounds", "defensive_rebounds", "total_rebounds",
     "assists", "steals", "turnovers", "blocks", "blocks_against",
     "fouls_committed", "fouls_received", "pir", "plus_minus",
+    # From the shot list: field goals inside the paint, and points by situation.
+    "paint_points", "paint_fg_made", "paint_fg_attempted",
+    "fastbreak_points", "second_chance_points", "points_off_turnovers",
 )
 
 # Percentages are computed from summed makes and attempts. Averaging each
@@ -37,6 +40,7 @@ PERCENTAGE_STATS = {
     "fg3_pct": (("fg3_made",), ("fg3_attempted",)),
     "ft_pct": (("ft_made",), ("ft_attempted",)),
     "fg_pct": (("fg2_made", "fg3_made"), ("fg2_attempted", "fg3_attempted")),
+    "paint_fg_pct": (("paint_fg_made",), ("paint_fg_attempted",)),
 }
 
 # Computed from the game result rather than stored. Works for teams and for

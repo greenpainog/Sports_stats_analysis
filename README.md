@@ -110,6 +110,14 @@ Advanced team stats (`analysis/advanced.py`), computed from summed box-score tot
 `stl_pct` and `blk_pct`. Possessions = FGA − OREB + TOV + 0.44 × FTA, averaged over both teams.
 Other sites use slightly different possession formulas, so their numbers can differ a little.
 
+**Shot-list stats** (teams and players, per game): `paint_points`, `paint_fg_made`,
+`paint_fg_attempted`, `paint_fg_pct`, `fastbreak_points`, `second_chance_points`,
+`points_off_turnovers`, and `pts_from_paint_pct`. They come from each game's shot list (the
+Euroleague "Points" endpoint). The paint is worked out from the shot coordinates (the FIBA paint,
+4.9 m × 5.8 m), not from the source's zone letters, which don't line up with it. A game's shot list
+must have the box score's made shots and free throws. 3 of 842 games don't, and they have no
+shot-list stats. 10 more are missing one missed attempt, which only affects `paint_fg_attempted`.
+
 **Player rankings.** `POST /player-rankings` ranks players on 47 stats; `POST /player-profile`
 shows one player's value and rank in all of them (`{"player": "Nunn", "season": "2026-27"}`).
 - Traditional: every box-score stat plus fg2/fg3/ft/fg %, win_pct; `per` is `game`, `total` or `per40`.
@@ -162,7 +170,9 @@ The older `matches` / `team_match_stats` tables remain so the current CLI keeps 
 - **Greek league:** planned, via a polite scraper of esake.gr.
 
 Raw responses are saved under `data/raw/`, each page is fetched once, and requests are at
-least one second apart. Data files, API keys and `.env` are never committed.
+least one second apart. A response is only cached if it is valid JSON, and it is written to a
+temporary file first. Tests load only cached files (`download=False`) and never make requests.
+Data files, API keys and `.env` are never committed.
 
 ## Roadmap
 
@@ -171,6 +181,6 @@ least one second apart. Data files, API keys and `.env` are never committed.
 2. Team/player alias tables and name resolution ✅ `database.aliases.resolve_team()` / `resolve_player()`
 3. Query layer (opponent, home/away, last N, opponent over .500, player absent) ✅ `analysis.stat_query.query_stats()`
 4. FastAPI + Pydantic `QuerySpec` API ✅ `api/` (`POST /query`, `GET /resolve/{kind}`, `GET /stats`)
-5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 76/76 (13 ranking questions) and 12/12 held-out with gpt-6-luna on 2026-11-15
+5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 80/80 (13 ranking, 4 shot-list questions) and 12/12 held-out with gpt-6-luna on 2026-11-15
 6. Greek league ingestion
 7. Docker, demo, agent for multi-step questions, Azure deployment

@@ -59,8 +59,11 @@ def league(tmp_path):
     db.DATABASE_FILE = original
 
 
+BOX_ONLY = [s for s in ADVANCED_TEAM_STATS if s != "pts_from_paint_pct"]  # this league has no shot list
+
+
 def _home(**kw):
-    r = team_rankings(list(ADVANCED_TEAM_STATS), **kw)
+    r = team_rankings(BOX_ONLY, **kw)
     return next(row for row in r.teams if row.team == "Home Club"), next(row for row in r.teams if row.team == "Away Club")
 
 
@@ -112,6 +115,10 @@ def test_filters_apply_to_advanced_stats(league):
     # Only g2 (Home won 92-90): H 73 FGA - 12 + 10 + 7.92 = 78.92; A 76 - 9 + 14 + 7.04 = 88.04; mean 83.48
     home = next(r for r in team_rankings(["off_rating", "pace"], last_n=1).teams if r.team == "Home Club")
     assert home.values == {"off_rating": 110.2, "pace": 74.2}  # 9200 / 83.48; 40 * 83.48 / 45
+
+
+def test_paint_share():
+    assert advanced_value("pts_from_paint_pct", {"paint_points": 30, "points": 80}, {}, 1) == 37.5
 
 
 def test_formulas_directly():

@@ -93,6 +93,9 @@ ADVANCED_TEAM_STATS = {
     "blk_pct": Advanced(
         lambda o, p, g: _ratio(o["blocks"], p["fg2_attempted"], 100), 1, ("blocks", "fg2_attempted"),
         "Share of the opponent's 2-point attempts the team blocked."),
+    "pts_from_paint_pct": Advanced(
+        lambda o, p, g: _ratio(o["paint_points"], o["points"], 100), 1, ("paint_points", "points"),
+        "Share of the team's points scored in the paint."),
 }
 
 
@@ -171,6 +174,8 @@ ADVANCED_PLAYER_STATS = {
                                  1, ("fg3_made", "points"), "Share of his points from 3-pointers."),
     "pts_from_ft_pct": Advanced(lambda pl, tm, op, g: _ratio(pl["ft_made"], pl["points"], 100),
                                 1, ("ft_made", "points"), "Share of his points from free throws."),
+    "pts_from_paint_pct": Advanced(lambda pl, tm, op, g: _ratio(pl["paint_points"], pl["points"], 100),
+                                   1, ("paint_points", "points"), "Share of his points scored in the paint."),
     "points_per_fga": Advanced(lambda pl, tm, op, g: _ratio(pl["points"], _fga(pl)), 2, _PL_SHOOT,
                                "Points per field goal attempt (free throws included in the points)."),
     "fg3a_rate": Advanced(lambda pl, tm, op, g: _ratio(pl["fg3_attempted"], _fga(pl), 100), 1, _SHOOTING,

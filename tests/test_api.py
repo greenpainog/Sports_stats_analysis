@@ -10,7 +10,7 @@ import database.db as db
 from analysis.stat_query import COUNTING_STATS
 from api.main import app
 from api.models import QuerySpec
-from ingestion.euroleague import STAT_COLUMNS
+from ingestion.euroleague import SHOT_STATS, STAT_COLUMNS
 from tests.test_stat_query import build_test_league
 
 
@@ -64,7 +64,7 @@ def test_queryspec_rejects_invalid_questions(bad):
 
 
 def test_stat_list_matches_what_ingestion_stores():
-    assert set(COUNTING_STATS) == set(STAT_COLUMNS.values()) | {"minutes", "plus_minus"}
+    assert set(COUNTING_STATS) == set(STAT_COLUMNS.values()) | {"minutes", "plus_minus"} | set(SHOT_STATS)
 
 
 # --- Endpoints ---------------------------------------------------------------
