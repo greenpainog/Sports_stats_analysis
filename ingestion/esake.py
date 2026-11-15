@@ -738,13 +738,16 @@ def playoff_series(html):
             if re.fullmatch(r"(QF|SF|F)\d+|3P", label)]
 
 
-def _ingest_games(games, season, download, phase, report):
+def _ingest_games(games, season, download, phase, report, skip=frozenset()):
     finished = [g for g in games if g["score"] is not None and g["start_passed"]]
     report["skipped"] += len(games) - len(finished)
     for g in finished:
+        if g["idgame"] in skip:
+            continue
         try:
             _, linked, review = ingest_game(g["idgame"], season, download, phase)
             report["saved"] += 1
+            report["new"].append(g["idgame"])
             report["linked"] += linked
             report["review"] += review
         except Exception as exc:  # keep going; report at the end
@@ -752,18 +755,27 @@ def _ingest_games(games, season, download, phase, report):
     return finished
 
 
-def ingest_season(season, download=True, verbose=True, max_rounds=40, playoffs=False):
+def ingest_season(season, download=True, verbose=True, max_rounds=40, playoffs=False, only_new=False):
     """Load every finished game of a season, round by round, until a round has none.
 
     playoffs=True also loads the second phase (one page per series; a series
     page with no finished games, such as an unneeded final game 5, is skipped).
-    Returns a report dict: saved, skipped (not finished), failed, linked, review.
+    only_new=True leaves games that are already saved alone (the daily update).
+    Returns a report dict: saved, new (ids saved), skipped (not finished),
+    failed, linked, review.
     """
     championship = CHAMPIONSHIPS[season]
-    report = {"saved": 0, "skipped": 0, "failed": [], "linked": [], "review": []}
+    report = {"saved": 0, "new": [], "skipped": 0, "failed": [], "linked": [], "review": []}
+    skip = frozenset()
+    if only_new:
+        conn = get_connection()
+        try:
+            skip = frozenset(row[0] for row in conn.execute("SELECT source_game_id FROM games WHERE source = ?", (SOURCE,)))
+        finally:
+            conn.close()
     for series in range(1, max_rounds + 1):
         games = list_games(_round_page(championship, series, download), season)
-        finished = _ingest_games(games, season, download, "regular_season", report)
+        finished = _ingest_games(games, season, download, "regular_season", report, skip)
         if verbose:
             print(f"round {series:02d}: {len(finished)} finished of {len(games)}", flush=True)
         if not finished:
@@ -771,7 +783,7 @@ def ingest_season(season, download=True, verbose=True, max_rounds=40, playoffs=F
     if playoffs:
         for code in playoff_series(_round_page(championship, "", download, playoffs=True)):
             games = list_games(_round_page(championship, code, download, playoffs=True), season)
-            finished = _ingest_games(games, season, download, "playoffs", report)
+            finished = _ingest_games(games, season, download, "playoffs", report, skip)
             if verbose:
                 print(f"playoff series {code}: {len(finished)} finished of {len(games)}", flush=True)
     return report

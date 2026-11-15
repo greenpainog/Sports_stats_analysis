@@ -199,6 +199,18 @@ count games in both leagues (a Sunday Greek game makes Tuesday's Euroleague game
   only while it lists a game that should have finished but has no score; a game counts as
   finished 3 hours after its start.
 
+**Daily update.** `python -m ingestion.daily_update` loads the current season's new games from both
+sources in one run: it takes a lock (`data/update.lock`, so two runs never overlap), backs up the
+database to `data/backups/` (last 7 kept), downloads the Euroleague game list again if the saved
+copy is over 20 hours old, and loads only games that are finished and not saved yet. A game counts
+as finished 3 hours after its start; a Euroleague game whose header still says live is not cached
+and is tried the next day. A quiet day costs 2-3 requests. Each run logs to
+`data/logs/update-<date>.log`, including new Greek players that look like a Euroleague player
+(`REVIEW` lines: link them in `MANUAL_PLAYER_LINKS` if they are the same person). Exit code 1 means
+some games failed, 2 that another run was in progress. To run it every day at 10:00 (or as soon as
+the PC is on), run `.\scripts\register_daily_update.ps1` once in PowerShell. The Greek playoffs and
+a new season's esake championship id still need adding by hand.
+
 Raw responses are saved under `data/raw/`, each page is fetched once, and requests are at
 least one second apart. A response is only cached if it is valid JSON, and it is written to a
 temporary file first. Tests load only cached files (`download=False`) and never make requests.

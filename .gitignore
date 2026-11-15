@@ -9,3 +9,6 @@ data/*.db
 data/*.csv
 rebounds_data.csv
 eval/results/
+data/backups/
+data/logs/
+data/update.lock

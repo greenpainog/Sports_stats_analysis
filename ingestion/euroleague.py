@@ -103,16 +103,19 @@ class NotCached(FileNotFoundError):
     """A file isn't in data/raw and downloading was turned off."""
 
 
-def _cached_get(path, url, params=None, download=True):
+def _cached_get(path, url, params=None, download=True, max_age_hours=None):
     """Return JSON from `path`; download it from `url` first only if it is missing.
 
-    With download=False a missing file raises NotCached instead (tests use this,
-    so they never make a request).
+    With max_age_hours, a saved copy older than that is downloaded again (the
+    season's game list, so new results show up). With download=False a missing
+    file raises NotCached instead (tests use this, so they never make a request).
     """
     global _last_request_time
     if not path.exists() and not download:
         raise NotCached(f"{path} is not cached and download=False.")
-    if not path.exists():
+    too_old = (max_age_hours is not None and path.exists()
+               and time.time() - path.stat().st_mtime > max_age_hours * 3600)
+    if not path.exists() or (too_old and download):
         wait = SECONDS_BETWEEN_REQUESTS - (time.monotonic() - _last_request_time)
         if wait > 0:
             time.sleep(wait)
@@ -138,15 +141,17 @@ def fetch_json(kind, competition, season, gamecode, download=True):
     )
 
 
-def fetch_season_games(competition, season, download=True):
+def fetch_season_games(competition, season, download=True, max_age_hours=None):
     """Return {gameCode: game} for a whole season (one request, cached).
 
-    This list has unambiguous UTC start times and clean club names.
+    This list has unambiguous UTC start times and clean club names. Pass
+    max_age_hours to download it again when the saved copy is older.
     """
     data = _cached_get(
         RAW_DIR / f"games_{competition}{season}.json",
         f"{SEASON_GAMES_URL}/{competition}/seasons/{competition}{season}/games",
         download=download,
+        max_age_hours=max_age_hours,
     )
     return {game["gameCode"]: game for game in data["data"]}
 
@@ -431,6 +436,55 @@ def ingest_game(competition, season, gamecode, download=True):
         note = f"no shot stats: {exc}"
     note = note or "; ".join(bundle["shot_notes"])
     return save_game_bundle(bundle), note
+
+
+class GameInProgress(Exception):
+    """The source still marks the game live; nothing was cached or saved."""
+
+
+def _finished_long_enough(game, now=None):
+    """True when the list says played and the game started more than 3 hours ago."""
+    start = datetime.strptime(game["utcDate"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return bool(game.get("played")) and ((now or datetime.now(timezone.utc)) - start).total_seconds() > 3 * 3600
+
+
+def ingest_new_games(competition, season, conn, list_max_age_hours=20, now=None):
+    """Load the season's finished games that aren't in the database yet.
+
+    The game list is downloaded again when the saved copy is older than
+    list_max_age_hours. A game counts as finished once the list says played
+    and it started more than 3 hours ago; if its header still says live, its
+    cached files are removed (so a half-time box score is never kept) and it
+    is tried again next time. Returns {"saved": [...], "notes": [...],
+    "waiting": [...], "failed": [...]}, each a list of (gamecode, text).
+    """
+    games = fetch_season_games(competition, season, max_age_hours=list_max_age_hours)
+    saved_ids = {row[0] for row in conn.execute(
+        "SELECT source_game_id FROM games WHERE source = 'euroleague' AND source_game_id LIKE ?",
+        (f"{competition}{season}-%",))}
+    report = {"saved": [], "notes": [], "waiting": [], "failed": []}
+    for gamecode in sorted(games):
+        game = games[gamecode]
+        if f"{competition}{season}-{gamecode}" in saved_ids or not game.get("played"):
+            continue
+        if not _finished_long_enough(game, now):
+            report["waiting"].append((gamecode, "started less than 3 hours ago"))
+            continue
+        try:
+            header = fetch_json("Header", competition, season, gamecode)
+            if header.get("Live"):
+                for kind in ("Header", "Boxscore", "Points"):
+                    (RAW_DIR / f"{kind.lower()}_{competition}{season}_{gamecode}.json").unlink(missing_ok=True)
+                raise GameInProgress("header still says live")
+            _, note = ingest_game(competition, season, gamecode)
+            report["saved"].append((gamecode, f"{game['local']['club']['name']} - {game['road']['club']['name']}"))
+            if note:
+                report["notes"].append((gamecode, note))
+        except GameInProgress as exc:
+            report["waiting"].append((gamecode, str(exc)))
+        except Exception as exc:  # keep going; report at the end
+            report["failed"].append((gamecode, f"{type(exc).__name__}: {exc}"))
+    return report
 
 
 def ingest_season(competition, season, verbose=True, download=True, notes=None):
