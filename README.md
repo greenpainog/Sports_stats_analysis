@@ -184,9 +184,18 @@ loaded, with `phase: "playoffs"`; the 2024-25 play-out (relegation round) and pl
 left out.
 
 **Which league.** Every query, ranking and `/ask` question has `competition`: `"euroleague"`
-(the default) or `"greek_league"`, so Euroleague answers never include Greek games. The Greek
-league has no plus-minus or shot-list stats, and asking for them is an error, not a 0. Rest days
-count games in both leagues (a Sunday Greek game makes Tuesday's Euroleague game short rest).
+(the default), `"eurocup"` or `"greek_league"`, so Euroleague answers never include other games.
+The Greek league has no plus-minus or shot-list stats, and asking for them is an error, not a 0.
+Rest days count games in every league (a Sunday Greek game makes Tuesday's Euroleague game short
+rest).
+
+**EuroCup** (2025-26 with playoffs, and 2026-27): same API and same club and player codes as the
+Euroleague, so Besiktas, or a player who moves up, is one row across both. Its knockout rounds
+(8F, 4F, 2F, Final) are `phase: "playoffs"`. Aris, Panionios and PAOK also play in the Greek
+league and are linked to their EuroCup rows like Panathinaikos and Olympiacos; loading the EuroCup
+meant rebuilding the Greek rows from the saved pages so their players link too. The source gave
+two players a second code mid-season; `PLAYER_CODE_FIXES` in `ingestion/euroleague.py` maps them
+back.
 
 ## Data sources
 
@@ -199,8 +208,8 @@ count games in both leagues (a Sunday Greek game makes Tuesday's Euroleague game
   only while it lists a game that should have finished but has no score; a game counts as
   finished 3 hours after its start.
 
-**Daily update.** `python -m ingestion.daily_update` loads the current season's new games from both
-sources in one run: it takes a lock (`data/update.lock`, so two runs never overlap), backs up the
+**Daily update.** `python -m ingestion.daily_update` loads the current season's new games from all three
+leagues (Euroleague, EuroCup, Greek league) in one run: it takes a lock (`data/update.lock`, so two runs never overlap), backs up the
 database to `data/backups/` (last 7 kept), downloads the Euroleague game list again if the saved
 copy is over 20 hours old, and loads only games that are finished and not saved yet. A game counts
 as finished 3 hours after its start; a Euroleague game whose header still says live is not cached
@@ -219,10 +228,10 @@ Data files, API keys and `.env` are never committed.
 ## Roadmap
 
 0. Housekeeping ✅
-1. Euroleague ingestion ✅ 2024-25 (330 games), 2025-26 (402) and 2026-27 so far
+1. Euroleague ingestion ✅ 2024-25 (330 games), 2025-26 (402) and 2026-27 so far; EuroCup 2025-26 (195) and 2026-27 so far
 2. Team/player alias tables and name resolution ✅ `database.aliases.resolve_team()` / `resolve_player()`
 3. Query layer (opponent, home/away, last N, opponent over .500, player absent) ✅ `analysis.stat_query.query_stats()`
 4. FastAPI + Pydantic `QuerySpec` API ✅ `api/` (`POST /query`, `GET /resolve/{kind}`, `GET /stats`)
-5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 87/87 (13 ranking, 4 shot-list, 6 Greek league questions) and 12/12 held-out with gpt-6-luna on 2026-11-15
+5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 93/93 (13 ranking, 4 shot-list, 6 Greek league, 6 EuroCup questions) and 12/12 held-out with gpt-6-luna on 2026-11-16
 6. Greek league ingestion ✅ 2024-25 (132 + 19 playoff games), 2025-26 (156 + 18) and 2026-27 so far, linked to the Euroleague players and clubs
 7. Docker, demo, agent for multi-step questions, Azure deployment

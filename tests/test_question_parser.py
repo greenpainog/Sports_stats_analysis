@@ -249,3 +249,8 @@ def test_unset_competition_keeps_the_default_and_a_side_inherits_it():
     assert [spec.competition for _, spec in result.spec.side_specs()] == ["greek_league", "greek_league"]
     plain, _ = parse("Bartley points", llm_output(stats=["points"], player="Bartley"))
     assert plain.spec.competition == "euroleague"
+
+
+def test_instructions_list_each_league_and_the_eurocup_rule():
+    text = build_instructions(date(2025, 11, 1), SEASONS, greek_seasons=["2025-26"], eurocup_seasons=["2025-26"])
+    assert "EuroCup seasons: 2025-26" in text and '"eurocup" when the question names the EuroCup' in text

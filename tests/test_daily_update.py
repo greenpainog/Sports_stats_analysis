@@ -104,3 +104,13 @@ def test_game_list_is_downloaded_again_when_old(monkeypatch, tmp_path):
     os.utime(path, (old, old))
     assert euroleague._cached_get(path, "url", max_age_hours=20) == {"new": True}
     assert len(calls) == 1
+
+
+def test_eurocup_knockout_rounds_are_playoffs():
+    for code in ("8F", "4F", "2F", "Final"):
+        assert euroleague._phase({"phaseType": {"code": code}}, "game") == "playoffs"
+
+
+def test_a_second_source_code_maps_to_the_first():
+    assert euroleague._player_code(" P015182 ") == "P009911"  # Gary Browne
+    assert euroleague._player_code("P011396") == "P011396"

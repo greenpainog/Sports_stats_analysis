@@ -57,7 +57,7 @@ LLMPlayerThreshold = create_model(
 # inherits the question's league instead of the model having to repeat it
 # (and a forced "euroleague" on a side silently overriding a Greek question).
 _THRESHOLD = {"player_threshold": Optional[LLMPlayerThreshold],
-              "competition": Optional[Literal["euroleague", "greek_league"]]}
+              "competition": Optional[Literal["euroleague", "eurocup", "greek_league"]]}
 LLMCompareSide = create_model(
     "LLMCompareSide", __config__=ConfigDict(extra="forbid"), **_llm_fields(CompareSide, **_THRESHOLD)
 )
@@ -83,8 +83,8 @@ class LLMRanking(BaseModel):
     ))
     other_team: Optional[str] = Field(description="matchup only: the second team.")
     player: Optional[str] = Field(description="player_profile only: the player.")
-    competition: Optional[Literal["euroleague", "greek_league"]] = Field(
-        description="null = euroleague; 'greek_league' for the Greek league (GBL).")
+    competition: Optional[Literal["euroleague", "eurocup", "greek_league"]] = Field(
+        description="null = euroleague; 'eurocup' for the EuroCup; 'greek_league' for the Greek league (GBL).")
     season: Optional[str]
     phase: Optional[Phase]
     venue: Optional[Venue]
@@ -184,17 +184,18 @@ def loaded_seasons(competition_id="E"):
     return [name for (name,) in rows]
 
 
-def build_instructions(today=None, seasons=None, greek_seasons=None):
+def build_instructions(today=None, seasons=None, greek_seasons=None, eurocup_seasons=None):
     today = today or date.today()
     seasons = seasons if seasons is not None else loaded_seasons()
     greek_seasons = greek_seasons if greek_seasons is not None else loaded_seasons("GBL")
+    eurocup_seasons = eurocup_seasons if eurocup_seasons is not None else loaded_seasons("U")
     current = seasons[-1] if seasons else None
     previous = seasons[-2] if len(seasons) > 1 else None
     return f"""You turn a basketball stats question into a query spec. You never answer the question yourself; code runs the query on a database.
 
-Data: two leagues. EuroLeague seasons: {", ".join(seasons) or "none"}. Greek league (Stoiximan GBL) seasons: {", ".join(greek_seasons) or "none"}. Today is {today.isoformat()}, so "{current}" is the current season, still in progress.
+Data: three leagues. EuroLeague seasons: {", ".join(seasons) or "none"}. EuroCup seasons: {", ".join(eurocup_seasons) or "none"}. Greek league (Stoiximan GBL) seasons: {", ".join(greek_seasons) or "none"}. Today is {today.isoformat()}, so "{current}" is the current season, still in progress.
 A spec has exactly one subject: one player OR one team.
-- competition: "greek_league" when the question names the Greek league ("Greek league", "GBL", "Stoiximan GBL", "Basket League", "in Greece", "domestically" for a Greek club); otherwise "euroleague", including when no league is named. E.g. "Bartley points in the Greek league this season" -> player "Bartley", competition "greek_league", season "{current}". The same goes in ranking.competition (null there means euroleague). A compare side may set competition ("in the Euroleague vs the Greek league").
+- competition: "eurocup" when the question names the EuroCup ("EuroCup", "Eurocup", "7DAYS EuroCup"). "greek_league" when the question names the Greek league ("Greek league", "GBL", "Stoiximan GBL", "Basket League", "in Greece", "domestically" for a Greek club); otherwise "euroleague", including when no league is named. E.g. "Bartley points in the Greek league this season" -> player "Bartley", competition "greek_league", season "{current}". The same goes in ranking.competition (null there means euroleague). A compare side may set competition ("in the Euroleague vs the Greek league").
 - The Greek league has no plus_minus and no shot-list stats (paint_points, fastbreak_points, second_chance_points, points_off_turnovers, paint_fg_pct, pts_from_paint_pct): asking for those in the Greek league is not answerable.
 
 How to fill the spec:
@@ -230,7 +231,7 @@ Stats for rankings also include advanced ones: possessions, pace, off_rating, de
 Close games ("decided by 5 or less", "+-5") -> max_margin 5; "in wins"/"in losses" -> result "won"/"lost". The season rules above apply to ranking.season too.
 
 Set answerable false, fill reason with one short sentence, and leave the other fields empty/null/false when the question:
-- is about another competition (NBA, EuroCup, Greek Cup, ACB, national teams, ...);
+- is about another competition (NBA, Basketball Champions League, Greek Cup, ACB, national teams, ...) or a EuroCup season that isn't loaded;
 - needs data we do not have (shot locations, salaries, height, dunks, injuries, transfers, coaches, attendance, ...);
 - compares two or more named players, or asks which of a few named players or teams is better ("Hifi or Theis", "who is better") — rankings over the whole league are fine, see ranking;
 - asks for a prediction or opinion, or is not a basketball stats question at all.

@@ -19,10 +19,10 @@ from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS, RESULT_STATS
 StatName = Literal[COUNTING_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS]
 CountingStatName = Literal[COUNTING_STATS]
 Venue = Literal["home", "away", "neutral"]
-Competition = Literal["euroleague", "greek_league"]
+Competition = Literal["euroleague", "eurocup", "greek_league"]
 COMPETITION_DESCRIPTION = (
-    "Which league's games: 'euroleague' (default) or 'greek_league' (Stoiximan GBL). "
-    "A player or club in both leagues is one subject; this picks the games."
+    "Which league's games: 'euroleague' (default), 'eurocup' or 'greek_league' (Stoiximan GBL). "
+    "A player or club in several leagues is one subject; this picks the games."
 )
 SeasonName = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}$")]
 Phase = Literal["regular_season", "play_in", "playoffs", "final_four"]

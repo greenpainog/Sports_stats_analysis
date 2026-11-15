@@ -50,7 +50,7 @@ RESULT_STATS = ("win_pct",)
 VENUES = ("home", "away", "neutral")
 
 # Competition name in a spec -> competitions.source_competition_id.
-COMPETITIONS = {"euroleague": "E", "greek_league": "GBL"}
+COMPETITIONS = {"euroleague": "E", "eurocup": "U", "greek_league": "GBL"}
 COMPETITION_SQL = """tg.season_id IN (SELECT s.id FROM seasons s JOIN competitions c ON c.id = s.competition_id
                                       WHERE c.source_competition_id = ?)"""
 
@@ -230,8 +230,8 @@ def query_stats(
     season: season name such as "2024-25". seasons: several season names,
         e.g. ["2025-26", "2026-27"]; not with `season`.
     phase: e.g. "regular_season".
-    competition: "euroleague" (default) or "greek_league". A player in both
-        leagues is one player; this decides which games count.
+    competition: "euroleague" (default), "eurocup" or "greek_league". A player
+        in several leagues is one player; this decides which games count.
     max_rest_hours / min_rest_hours: hours since the subject's team played
         its previous loaded game (e.g. max_rest_hours=48 for two games within
         48 hours). A team's first loaded game has no rest value and is left

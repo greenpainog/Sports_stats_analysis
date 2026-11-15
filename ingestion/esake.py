@@ -55,7 +55,7 @@ HEADERS = ("P", "2PM-A", "3PM-A", "FTM-A", "REBS", "D.REBS", "O.REBS", "AST", "B
            "FOULS F", "FOULS M", "STL", "TO", "TIM.PL.", "RANK")
 TEAM_ROW, TOTAL_ROW = "ΟΜΑΔΙΚΑ - ΠΑΓΚΟΣ", "ΣΥΝΟΛΟ"
 
-# esake team id -> (English name, extra Latin aliases, Euroleague club code or None).
+# esake team id -> (English name, extra Latin aliases, Euroleague or EuroCup club code (same API, same codes) or None).
 # Pages name clubs in Greek capitals ("ΑΕΚ"); the alias resolver only keeps
 # Latin letters, so every club needs a Latin name. Clubs that also play in the
 # Euroleague are linked to that existing row (one Panathinaikos, not two).
@@ -63,8 +63,8 @@ TEAMS = {
     "00000001": ("Panathinaikos", [], "PAN"),
     "00000002": ("Olympiacos", [], "OLY"),
     "00000010": ("AEK Athens", ["AEK", "AEK BC"], None),
-    "00000005": ("Aris Thessaloniki", ["Aris"], None),
-    "0000000C": ("PAOK", ["PAOK Thessaloniki"], None),
+    "00000005": ("Aris Thessaloniki", ["Aris"], "ARI"),  # also EuroCup
+    "0000000C": ("PAOK", ["PAOK Thessaloniki"], "PAO"),  # also EuroCup (2026-27)
     "0000000D": ("Peristeri", ["Peristeri Betsson"], None),
     "2A25C696": ("Promitheas Patras", ["Promitheas", "Promitheas Vikos Cola"], None),
     "0000000A": ("Kolossos Rhodes", ["Kolossos", "Kolossos H Hotels"], None),
@@ -75,7 +75,7 @@ TEAMS = {
     "3CA10C07": ("Doxa Lefkadas", ["Doxa", "Doxa Lefkadas Elabet"], None),
     "0041ADCB": ("Vikos Falcons", ["Falcons"], None),
     # Only in older seasons:
-    "00000003": ("Panionios", ["Panionios Cosmorama Travel"], None),
+    "00000003": ("Panionios", ["Panionios Cosmorama Travel"], "NIO"),  # EuroCup 2025-26
     "F7D46144": ("Lavrio", ["Lavrio DHI", "Lavrio Megabolt"], None),
 }
 # esake championship id per season, from the results page's season list.
@@ -121,6 +121,22 @@ MANUAL_PLAYER_LINKS = {
     "FC26E3ED": "P007853",  # Shaquielle McKissic
     "EC835FC9": "P007982",  # Nigel Williams-Goss
     "3BB61443": "P014212",  # Monte Morris
+    # Found once the EuroCup was loaded (2026-11-16); same club in both leagues
+    # in the same weeks, or no overlap at all.
+    "16AE30FC": "P012005",  # Dimitris / Dimitrios Kaklamanakis
+    "49574E22": "P010387",  # Nikos / Nikolaos Persidis
+    "F5C9A62B": "P012616",  # Giorgos / Georgios Fillios
+    "448AF744": "P009577",  # Thanasis / Athanasios Bazinas
+    "F42B3D2C": "P013958",  # Stelios / Stylianos Poulianitis (not Marios Poulianitis)
+    "E223062A": "P013356",  # Giorgos / Georgios Gkiouzelis
+    "4E78654C": "P014166",  # Will McNair / William McNair Jr.
+    "E02706AA": "P007437",  # Kostas / Konstantinos Gontikas
+    "128F4556": "P012638",  # Vasilis / Vasillis Kazamias
+    "35C5EE78": "P014170",  # Stedmon Lemon (Greek letters on esake)
+    "4517CD53": "P006068",  # Amine Noua
+    "22EF973B": "P013248",  # James Banks
+    "91A60582": "P013849",  # Grant Golden
+    "9B095932": "P014907",  # Elvar Fridriksson
 }
 # esake player id -> the real spelling, for players written only in Greek
 # letters who aren't linked to a Euroleague row (transliteration gives
@@ -130,8 +146,8 @@ MANUAL_PLAYER_LINKS = {
 MANUAL_NAMES = {
     "139F0EBB": "Gabriel Galvanini", "405192E7": "Cameron Reynolds", "2A79ECAD": "Mindaugas Kuzminskas",
     "0B4BA1C7": "Kendrick Ray", "88A8B311": "Nate Watson", "F2C4F5E2": "Andrew Goudelock",
-    "D8AAA670": "Marko Pecarski", "2D7697E1": "Prentiss Hubb", "91A60582": "Grant Golden",
-    "C33BFBFA": "Hunter Hale", "9B095932": "Elvar Fridriksson", "52E19D5D": "Wes Iwundu",
+    "D8AAA670": "Marko Pecarski", "2D7697E1": "Prentiss Hubb", 
+    "C33BFBFA": "Hunter Hale", "52E19D5D": "Wes Iwundu",
     "F06E1579": "Rashad Vaughn", "7B8D6590": "Shavar Reynolds", "9FFCB24C": "Dan Akin",
     "6A0C83E7": "Jake VanTubbergen", "2C0B2DE8": "Trevon Allen", "FFF395A0": "Chavez Goodwin",
     "A526A086": "Jarell Eddie", "FC6A957C": "Ryan Woolridge", "BCAE1788": "Devin Davis",
@@ -139,7 +155,7 @@ MANUAL_NAMES = {
     "915AFB05": "Cyril Langevine", "9C923A09": "Josh Roberts", "025BC51F": "Landry Nnoko",
     "53E8F901": "Jacorey Williams", "899F2E06": "Langston Hall", "6E6CF8F4": "Myles Hesson",
     "C8E63EEC": "Brandon Slater", "02211B0A": "Rion Brown", "BD97A63B": "Alexander Madsen",
-    "24D310BE": "Kenny Williams", "B992196A": "Taz Sherman", "4517CD53": "Amine Noua",
+    "24D310BE": "Kenny Williams", "B992196A": "Taz Sherman", 
     "0949B704": "Sam Griffin", "67B12642": "Tobin Carberry", "22136494": "Daryl Macon",
     "7CFC487F": "Simi Shittu", "BA572D1F": "Nick McGlynn", "8FAF270E": "Oleksandr Lypovyy",
     "17958650": "Justin Wright-Foreman", "694251BC": "Shahada Wells", "514FA5E4": "Marcus Keene",
@@ -564,7 +580,7 @@ def _team(box):
 # --- Linking to rows from other sources --------------------------------------------
 
 def link_teams(conn):
-    """Link the Greek clubs that also play in the Euroleague to their Euroleague rows."""
+    """Link the Greek clubs that also play in the Euroleague or EuroCup to those rows."""
     cursor = conn.cursor()
     for esake_id, (_, _, euroleague_code) in TEAMS.items():
         if euroleague_code is None:
@@ -605,6 +621,8 @@ def link_players(conn, bundle):
             link_source_id(cursor, "player", SOURCE, esake_id, target[0], "manual")
             continue
         names = {normalize_name(player["name"]), *(normalize_name(a) for a in player.get("aliases", []))}
+        if esake_id in MANUAL_NAMES:  # the real spelling, for a name written in Greek letters
+            names.add(normalize_name(MANUAL_NAMES[esake_id]))
         marks = ", ".join("?" for _ in names)
         matches = cursor.execute(
             f"""SELECT DISTINCT p.id, p.name FROM players p JOIN player_aliases a ON a.player_id = p.id

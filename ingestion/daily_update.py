@@ -1,4 +1,4 @@
-"""Daily update: load new Euroleague and Greek league games for the current season.
+"""Daily update: load new Euroleague, EuroCup and Greek league games for the current season.
 
     python -m ingestion.daily_update
 
@@ -6,8 +6,9 @@ Run once a day (Windows Task Scheduler, see the README). Steps:
 1. Take a lock (data/update.lock), so two runs never overlap and the
    one-request-per-second rule holds across both sources.
 2. Back up the database to data/backups/ (the last 7 copies are kept).
-3. Euroleague: download the season's game list again if it is older than
-   20 hours, then load finished games that aren't saved yet.
+3. Euroleague, then EuroCup (same API): download the season's game list
+   again if it is older than 20 hours, then load finished games that aren't
+   saved yet.
 4. Greek league: re-read the round pages (only stale ones are downloaded)
    and load finished games that aren't saved yet.
 5. Write a log to data/logs/update-<date>.log, including new Greek players
@@ -77,13 +78,14 @@ def backup_database(source=None, backup_dir=BACKUP_DIR, keep=BACKUPS_KEPT):
     return target
 
 
-def update_euroleague(season_start):
+def update_euroleague(season_start, competition="E"):
+    name = euroleague.COMPETITION_NAMES[competition]
     conn = db.get_connection()
     try:
-        report = euroleague.ingest_new_games("E", season_start, conn)
+        report = euroleague.ingest_new_games(competition, season_start, conn)
     finally:
         conn.close()
-    log.info("Euroleague %s: %d new game(s)", season_start, len(report["saved"]))
+    log.info("%s %s: %d new game(s)", name, season_start, len(report["saved"]))
     for code, teams in report["saved"]:
         log.info("  saved game %s: %s", code, teams)
     for code, note in report["notes"]:
@@ -123,12 +125,14 @@ def run(today=None):
     backup = backup_database()
     log.info("Backed up the database to %s", backup.name)
     failures = 0
-    for number, (name, step, arg) in enumerate((("Euroleague", update_euroleague, season_start),
-                                                ("Greek league", update_greek_league, season_name))):
-        if number:
+    steps = (("Euroleague", update_euroleague, (season_start, "E")),
+             ("EuroCup", update_euroleague, (season_start, "U")),
+             ("Greek league", update_greek_league, (season_name,)))
+    for number, (name, step, args) in enumerate(steps):
+        if number == len(steps) - 1:
             time.sleep(euroleague.SECONDS_BETWEEN_REQUESTS)  # each loader times only its own requests
         try:
-            failures += step(arg)
+            failures += step(*args)
         except Exception:  # one league failing shouldn't stop the other
             log.exception("%s update failed", name)
             failures += 1

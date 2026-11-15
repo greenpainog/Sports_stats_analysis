@@ -53,12 +53,31 @@ TEAM_NICKNAMES = {
     "ZAL": ["Žalgiris", "Zalgiris Kaunas"],
 }
 
+# The source gave one player a second code partway through a season (same
+# name, same club, no overlapping games): second code -> the first one, so he
+# stays one player. Checked 2026-11-16.
+PLAYER_CODE_FIXES = {
+    "P015182": "P009911",  # Gary Browne, Bosna Sarajevo (EuroCup 2026-27)
+    "P014175": "P003215",  # Aurimas Majauskas, Neptunas Klaipeda (EuroCup 2025-26)
+}
+
+
+def _player_code(raw):
+    code = _clean(raw)
+    return PLAYER_CODE_FIXES.get(code, code)
+
+
 # Season list phaseType.code -> games.phase
 PHASES = {
     "RS": "regular_season",
     "PI": "play_in",
     "PO": "playoffs",
     "FF": "final_four",
+    # EuroCup knockout rounds (eighthfinals, quarterfinals, semifinals, finals)
+    "8F": "playoffs",
+    "4F": "playoffs",
+    "2F": "playoffs",
+    "Final": "playoffs",
 }
 
 # Source column -> our stat_name. Makes and attempts stay separate so that
@@ -342,7 +361,7 @@ def build_game_bundle(header, boxscore, schedule_game, competition, season, game
                 continue  # Did not play: no appearance and no stat rows.
             player = {
                 "name": player_display_name(row["Player"]),
-                "source_player_id": _clean(row["Player_ID"]),
+                "source_player_id": _player_code(row["Player_ID"]),
                 "aliases": [_clean(row["Player"])],  # 'NUNN, KENDRICK'
             }
             appearances.append(
@@ -383,7 +402,7 @@ def build_game_bundle(header, boxscore, schedule_game, competition, season, game
             stats.extend(_shot_items(shot_totals(team_shots), "team", side))
             by_player = {}
             for row in team_shots:
-                by_player.setdefault(_clean(row["ID_PLAYER"]), []).append(row)
+                by_player.setdefault(_player_code(row["ID_PLAYER"]), []).append(row)
             unknown = sorted(set(by_player) - set(played))
             if unknown:
                 raise ShotListMismatch(f"{label}: shots by players not in the box score: {', '.join(unknown)}.")
