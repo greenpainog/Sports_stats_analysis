@@ -30,7 +30,8 @@ EVAL_DIR = Path(__file__).resolve().parent
 QUESTIONS_FILE = EVAL_DIR / "questions.jsonl"
 RESULTS_DIR = EVAL_DIR / "results"
 NAME_FIELDS = {"player": resolve_player, "team": resolve_team, "opponent": resolve_team,
-               "without_player": resolve_player, "with_player": resolve_player}
+               "without_player": resolve_player, "with_player": resolve_player,
+               "against_player": resolve_player}
 
 
 def load_questions(path=QUESTIONS_FILE):

@@ -39,6 +39,10 @@ def test_queryspec_accepts_a_valid_question():
     {"stats": ["assists"], "player": "Nunn", "venue": "road"},     # bad venue
     {"stats": ["assists"], "player": "Nunn", "last_n": 0},         # last_n too small
     {"stats": ["assists"], "player": "Nunn", "season": "2024"},    # bad season format
+    {"stats": ["assists"], "player": "Nunn", "seasons": ["2024-25"]},                # one season in seasons
+    {"stats": ["assists"], "player": "Nunn", "seasons": ["2024-25", "2024-25"]},     # same season twice
+    {"stats": ["assists"], "player": "Nunn", "seasons": ["2024-25", "2025"]},        # bad season format
+    {"stats": ["assists"], "player": "Nunn", "season": "2024-25", "seasons": ["2024-25", "2025-26"]},
     {"stats": ["assists"], "player": "Nunn", "sql": "DROP TABLE"},  # unknown field
     {"stats": ["assists"], "player": "Nunn", "max_rest_hours": -5},  # negative rest
     {"stats": ["assists"], "player": "Nunn", "min_rest_hours": 72, "max_rest_hours": 48},

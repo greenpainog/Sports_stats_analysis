@@ -168,6 +168,29 @@ class StatQueryTests(unittest.TestCase):
             [g.game_id for g in everything.games],
         )
 
+    def test_against_player_counts_only_games_he_played_for_the_opponent(self):
+        # Sid Kick played for Alpha against Gamma in g3 and g7.
+        gamma = query_stats(["total_rebounds"], team="Gamma", against_player="Sid Kick")
+        self.assertEqual([_day(g) for g in gamma.games], ["2024-10-15", "2024-10-24"])
+        # Olly Kick played for Gamma against Beta in g5 only.
+        beta = query_stats(["total_rebounds"], team="Beta", against_player="Olly Kick")
+        self.assertEqual([_day(g) for g in beta.games], ["2024-10-29"])
+        self.assertEqual(beta.filters, {"against_player": "Olly Kick"})
+
+    def test_teammates_are_never_against_each_other(self):
+        # with_player finds g2 and g3; against_player finds none, they're both on Alpha.
+        self.assertEqual(query_stats(["assists"], player="Shooter", against_player="Sid Kick").games, [])
+        with self.assertRaises(QueryError):
+            query_stats(["assists"], player="Shooter", against_player="Sam Shooter")
+
+    def test_several_seasons(self):
+        both = query_stats(["total_rebounds"], team="Alpha", seasons=["2025-26", "2024-25"])
+        first = query_stats(["total_rebounds"], team="Alpha", season="2024-25")
+        self.assertEqual((len(both.games), len(first.games)), (5, 4))
+        self.assertEqual(both.filters, {"seasons": "2024-25, 2025-26"})
+        with self.assertRaises(QueryError):
+            query_stats(["total_rebounds"], team="Alpha", season="2024-25", seasons=["2024-25", "2025-26"])
+
     def test_same_player_with_and_without_is_an_error(self):
         # Two spellings of the same player.
         with self.assertRaises(QueryError) as ctx:

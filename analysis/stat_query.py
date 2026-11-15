@@ -6,6 +6,8 @@
     query_stats(["total_rebounds"], team="Panathinaikos", opponent="Zalgiris",
                 venue="away", without_player="Cedi Osman")
     query_stats(["points", "fg3_pct"], player="Fournier", with_player="Dorsey")
+    query_stats(["points"], player="Hifi", against_player="Theis",
+                seasons=["2025-26", "2026-27"])
     query_stats(["win_pct", "turnovers", "fg_pct"], team="Olympiacos", max_rest_hours=48)
 
 Names are resolved through the alias tables. The SQL is always built here from
@@ -163,7 +165,9 @@ def query_stats(
     opponent_over_500=False,
     without_player=None,
     with_player=None,
+    against_player=None,
     season=None,
+    seasons=None,
     phase=None,
     max_rest_hours=None,
     min_rest_hours=None,
@@ -181,7 +185,12 @@ def query_stats(
         joined do not count). Season-level: after a mid-season move, his old
         team's later games still count as "without" him.
     with_player: only games in which this player appeared (for either team).
-    season: season name such as "2024-25". phase: e.g. "regular_season".
+    against_player: only games in which this player appeared for the
+        subject's opponent (for a player subject: the other team, so games
+        where they were teammates never count).
+    season: season name such as "2024-25". seasons: several season names,
+        e.g. ["2025-26", "2026-27"]; not with `season`.
+    phase: e.g. "regular_season".
     max_rest_hours / min_rest_hours: hours since the subject's team played
         its previous loaded game (e.g. max_rest_hours=48 for two games within
         48 hours). A team's first loaded game has no rest value and is left
@@ -204,6 +213,8 @@ def query_stats(
         raise QueryError("last_n must be at least 1.")
     if not stats:
         raise QueryError("Ask for at least one stat.")
+    if season is not None and seasons:
+        raise QueryError("Give either season or seasons, not both.")
     if player_threshold is not None:
         threshold_stat = player_threshold.get("stat")
         low, high = player_threshold.get("min"), player_threshold.get("max")
@@ -265,10 +276,25 @@ def query_stats(
                 "EXISTS (SELECT 1 FROM game_appearances w WHERE w.game_id = tg.game_id AND w.player_id = ?)"
             )
             params.append(present_id)
+        if against_player is not None:
+            rival_id, filters["against_player"] = _resolve(
+                lambda t: resolve_player(t, conn), against_player, "player"
+            )
+            if rival_id == subject_id and subject_type == "player":
+                raise QueryError("A player cannot play against himself.")
+            # He appeared for the opponent's side of this game.
+            where.append("""EXISTS (SELECT 1 FROM game_appearances v WHERE v.game_id = tg.game_id
+                                    AND v.team_id = tg.opponent_id AND v.player_id = ?)""")
+            params.append(rival_id)
         if season is not None:
             filters["season"] = season
             where.append("tg.season_id IN (SELECT id FROM seasons WHERE name = ?)")
             params.append(season)
+        if seasons:
+            names = sorted(set(seasons))
+            filters["seasons"] = ", ".join(names)
+            where.append(f"tg.season_id IN (SELECT id FROM seasons WHERE name IN ({', '.join('?' for _ in names)}))")
+            params += names
         if phase is not None:
             filters["phase"] = phase
             where.append("tg.phase = ?")

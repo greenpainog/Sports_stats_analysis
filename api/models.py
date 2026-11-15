@@ -5,9 +5,10 @@ it as input, and in phase 5 the LLM's only job is to produce a valid QuerySpec.
 Field descriptions end up in the JSON schema, which the LLM will see.
 """
 import json
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+
 
 from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS, RESULT_STATS
 
@@ -16,6 +17,7 @@ from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS, RESULT_STATS
 StatName = Literal[COUNTING_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS]
 CountingStatName = Literal[COUNTING_STATS]
 Venue = Literal["home", "away", "neutral"]
+SeasonName = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}$")]
 Phase = Literal["regular_season", "play_in", "playoffs", "final_four"]
 
 
@@ -56,7 +58,14 @@ class Filters(BaseModel):
     with_player: Optional[str] = Field(
         None, description="Only games in which this player appeared (for either team)."
     )
-    season: Optional[str] = Field(None, pattern=r"^\d{4}-\d{2}$", description="Season such as '2024-25'.")
+    against_player: Optional[str] = Field(
+        None, description="Only games in which this player played for the opponent, e.g. 'against Theis'."
+    )
+    season: Optional[SeasonName] = Field(None, description="Season such as '2024-25'.")
+    seasons: Optional[list[SeasonName]] = Field(
+        None, min_length=2, max_length=10,
+        description="Several seasons at once, e.g. ['2024-25', '2025-26', '2026-27'] for 'last 3 seasons'. Not with season.",
+    )
     phase: Optional[Phase] = None
     max_rest_hours: Optional[float] = Field(
         None, gt=0, le=24 * 365,
@@ -76,6 +85,14 @@ class Filters(BaseModel):
             "or 'when Nunn scores 20+'. Games that player missed never count."
         ),
     )
+
+
+    @field_validator("seasons")
+    @classmethod
+    def sort_seasons(cls, value):
+        if value is not None and len(set(value)) != len(value):
+            raise ValueError("Each season may be listed only once.")
+        return sorted(value) if value is not None else None
 
 
 FILTER_FIELDS = tuple(Filters.model_fields)
@@ -120,6 +137,8 @@ class QuerySpec(Filters):
         if (self.min_rest_hours is not None and self.max_rest_hours is not None
                 and self.min_rest_hours > self.max_rest_hours):
             raise ValueError("min_rest_hours cannot be more than max_rest_hours.")
+        if self.season is not None and self.seasons is not None:
+            raise ValueError("Give either season or seasons, not both.")
         if self.compare:
             self.side_specs()  # raises if a side is empty, repeated or invalid once merged
         return self
