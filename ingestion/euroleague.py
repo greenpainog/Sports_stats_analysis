@@ -273,6 +273,14 @@ def build_game_bundle(header, boxscore, schedule_game, competition, season, game
         # "totr" is the team total, which already includes the unassigned
         # "Team" row (team rebounds, shot-clock turnovers, ...).
         stats.extend(_stat_items(side_stats["totr"], "team", side))
+        # Player minutes added up: 200 for 40 minutes, 225 with one overtime.
+        # Pace (possessions per 40 minutes) needs it for overtime games.
+        team_minutes = minutes_to_float(side_stats["totr"].get("Minutes"))
+        if team_minutes is not None:
+            stats.append({
+                "entity_type": "team", "team": side, "stat_name": "minutes",
+                "stat_value": team_minutes, "raw_value": _clean(side_stats["totr"]["Minutes"]), "unit": "min",
+            })
 
     return {
         "source": SOURCE,

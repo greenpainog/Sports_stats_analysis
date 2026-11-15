@@ -190,8 +190,8 @@ class OneGameTests(unittest.TestCase):
         self.assertEqual(counts["players"], 21)
         self.assertEqual(counts["game_appearances"], 21)
         self.assertEqual(home_points, 77)
-        # 21 players x 20 stats (18 mapped + minutes + plus_minus) + 2 teams x 18
-        self.assertEqual(counts["game_stats"], 21 * 20 + 2 * 18)
+        # 21 players x 20 stats (18 mapped + minutes + plus_minus) + 2 teams x 19 (18 + minutes)
+        self.assertEqual(counts["game_stats"], 21 * 20 + 2 * 19)
 
 
 if __name__ == "__main__":
