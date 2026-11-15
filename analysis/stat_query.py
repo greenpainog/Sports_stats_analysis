@@ -81,6 +81,7 @@ class StatSummary:
     pct: float = None  # 0-100, None when there were no attempts
     wins: int = None  # win_pct only
     losses: int = None
+    value: float = None  # advanced stats (ratings, pace, ...), already rounded
 
 
 @dataclass

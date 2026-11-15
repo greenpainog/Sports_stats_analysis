@@ -103,6 +103,13 @@ Filters: `season`, `phase`, `venue`, `result` (`won`/`lost`), `max_margin` (5 = 
 what teams allowed. Rank 1 is always the highest value, also for turnovers, fouls and points
 allowed; teams with the same shown value share a rank.
 
+Advanced team stats (`analysis/advanced.py`), computed from summed box-score totals:
+`possessions`, `pace` (per 40 minutes, so overtime doesn't inflate it), `off_rating`,
+`def_rating`, `net_rating` (per 100 possessions), `efg_pct`, `ts_pct`, `tov_pct`, `oreb_pct`,
+`dreb_pct`, `ft_rate` (FTA/FGA), `fg3a_rate`, `ast_pct` (assisted share of made shots), `ast_to`,
+`stl_pct` and `blk_pct`. Possessions = FGA − OREB + TOV + 0.44 × FTA, averaged over both teams.
+Other sites use slightly different possession formulas, so their numbers can differ a little.
+
 The database path defaults to `data/sports_analytics.db` in the project folder;
 set the `SPORTS_DB_PATH` environment variable to use another file.
 

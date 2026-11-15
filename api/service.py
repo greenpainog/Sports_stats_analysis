@@ -1,6 +1,7 @@
 """Run a validated QuerySpec, including comparisons. Used by /query, /ask and the eval."""
 from dataclasses import asdict
 
+from analysis.advanced import ADVANCED_TEAM_STATS
 from analysis.rankings import matchup, team_rankings
 from analysis.stat_query import query_stats
 from api.models import (
@@ -77,8 +78,8 @@ def rankings_spec(spec: RankingSpec) -> RankingsResponse:
                             team_count=len(r.teams), teams=[_row(row) for row in r.teams])
 
 
-def _cell(value, rank, count):
-    shown = "-" if value is None else f"{value:.1f}"
+def _cell(value, rank, count, decimals=1):
+    shown = "-" if value is None else f"{value:.{decimals}f}"
     return f"{shown} (#{rank}/{count})" if rank is not None else shown
 
 
@@ -88,8 +89,10 @@ def matchup_text(m) -> str:
     width = max(len(stat) for stat in m.rankings.stats)
     lines = [f"{a.team} ({a.games} games) vs {b.team} ({b.games} games), ranks out of {count} teams:"]
     for stat in m.rankings.stats:
-        lines.append(f"  {stat:<{width}}  {_cell(a.values[stat], a.ranks[stat], count):>16}"
-                     f"  {_cell(b.values[stat], b.ranks[stat], count):>16}")
+        # ft_rate (0.352) and ast_to (1.37) need more than one decimal.
+        decimals = ADVANCED_TEAM_STATS[stat].decimals if stat in ADVANCED_TEAM_STATS else 1
+        lines.append(f"  {stat:<{width}}  {_cell(a.values[stat], a.ranks[stat], count, decimals):>16}"
+                     f"  {_cell(b.values[stat], b.ranks[stat], count, decimals):>16}")
     return "\n".join(lines)
 
 

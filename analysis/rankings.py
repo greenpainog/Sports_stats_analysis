@@ -12,12 +12,14 @@ decides what "good" means. Teams with the same shown value share a rank.
 """
 from dataclasses import dataclass, field
 
+from analysis.advanced import ADVANCED_TEAM_STATS, advanced_value, possessions
 from analysis.stat_query import (
     COUNTING_STATS,
     PERCENTAGE_STATS,
     RESULT_STATS,
     TEAM_GAMES_CTE,
     QueryError,
+    StatSummary,
     _check_stats,
     _resolve,
     _summarise,
@@ -27,7 +29,7 @@ from database.db import get_connection
 
 # Minutes and plus-minus are player stats only; teams always play the whole game.
 TEAM_STATS = tuple(s for s in COUNTING_STATS if s not in ("minutes", "plus_minus"))
-RANKABLE_TEAM_STATS = TEAM_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS
+RANKABLE_TEAM_STATS = TEAM_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS + tuple(ADVANCED_TEAM_STATS)
 RESULTS = ("won", "lost")
 SIDES = ("team", "opponent")
 PER = ("game", "total")
@@ -57,10 +59,28 @@ class Rankings:
 
 
 def _ranked_value(summary, per):
+    if summary.value is not None:
+        return summary.value
     if summary.pct is not None or summary.attempted is not None or summary.wins is not None:
         return summary.pct  # percentages and win_pct: None when there were no attempts
     value = summary.per_game if per == "game" else summary.total
     return None if value is None else round(value, DECIMALS)
+
+
+def _totals(games):
+    """Sum each stored stat over a team's games (a missing value counts as 0)."""
+    totals = {}
+    for game in games:
+        for stat, value in game.items():
+            totals[stat] = totals.get(stat, 0) + (value or 0)
+    return _Zero(totals)
+
+
+class _Zero(dict):
+    """Totals where a stat no game recorded is 0, so a formula never hits a KeyError."""
+
+    def __missing__(self, key):
+        return 0
 
 
 def _rank(rows, stat):
@@ -160,8 +180,12 @@ def team_rankings(
             stored = {row[0] for row in conn.execute(
                 "SELECT DISTINCT stat_name FROM game_stats WHERE entity_type = 'team'")}
             stats = [s for s in stats if s in stored or s in RESULT_STATS or (
-                s in PERCENTAGE_STATS and set(sum(PERCENTAGE_STATS[s], ())) <= stored)]
-        _check_stats(conn, [s for s in stats if s not in RESULT_STATS])
+                s in PERCENTAGE_STATS and set(sum(PERCENTAGE_STATS[s], ())) <= stored) or (
+                s in ADVANCED_TEAM_STATS and set(ADVANCED_TEAM_STATS[s].needs) <= stored)]
+        # An advanced stat is checked through the stored stats its formula reads.
+        needed = {need for s in stats if s in ADVANCED_TEAM_STATS for need in ADVANCED_TEAM_STATS[s].needs}
+        _check_stats(conn, sorted(needed | {s for s in stats if s not in RESULT_STATS
+                                            and s not in ADVANCED_TEAM_STATS}))
         games = conn.execute(sql, params).fetchall()
         # Both sides' team rows for the matching games (at most ~850 ids, under SQLite's limit).
         game_ids = sorted({row[0] for row in games})
@@ -178,20 +202,29 @@ def team_rankings(
     for game_id, team_id, stat_name, value in stat_rows:
         by_side.setdefault((game_id, team_id), {})[stat_name] = value
 
-    per_team, names = {}, {}
+    per_team, other_side, names = {}, {}, {}
     for game_id, team_id, opponent_id, team_score, opponent_score, name in games:
         names[team_id] = name
-        source = team_id if side == "team" else opponent_id
-        values = dict(by_side.get((game_id, source), {}))
+        rated, other = (team_id, opponent_id) if side == "team" else (opponent_id, team_id)
+        values = dict(by_side.get((game_id, rated), {}))
         values["win"] = 1 if team_score > opponent_score else 0
         per_team.setdefault(team_id, {})[game_id] = values
+        other_side.setdefault(team_id, {})[game_id] = by_side.get((game_id, other), {})
 
     rows = []
     for team_id, values in per_team.items():
         game_ids = list(values)
         row = TeamRow(names[team_id], team_id, len(game_ids))
+        own = _totals(values.values())
+        opp = _totals(other_side[team_id].values())
         for stat in stats:
-            row.summary[stat] = _summarise(stat, values, game_ids)
+            if stat in ADVANCED_TEAM_STATS:
+                value = advanced_value(stat, own, opp, len(game_ids))
+                if stat == "possessions" and per == "total" and value is not None:
+                    value = round(possessions(own, opp), 1)
+                row.summary[stat] = StatSummary(stat, len(game_ids), value=value)
+            else:
+                row.summary[stat] = _summarise(stat, values, game_ids)
             row.values[stat] = _ranked_value(row.summary[stat], per)
         rows.append(row)
     for stat in stats:

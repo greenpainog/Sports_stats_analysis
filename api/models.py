@@ -188,6 +188,7 @@ class StatSummary(BaseModel):
     pct: Optional[float] = None
     wins: Optional[int] = None
     losses: Optional[int] = None
+    value: Optional[float] = Field(None, description="Advanced stats only (off_rating, pace, ...).")
 
 
 class QueryResponse(BaseModel):
