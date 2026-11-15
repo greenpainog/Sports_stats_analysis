@@ -16,6 +16,7 @@ from ingestion.esake import (
     check_game,
     display_name,
     parse_game_page,
+    to_latin,
 )
 
 
@@ -26,6 +27,22 @@ def test_page_championship_comes_from_player_links_not_the_banner():
     assert _page_championship("no links") is None
     with pytest.raises(ValueError):
         _page_championship(link.format(1052912363) + link.format(307258553))
+
+
+def test_greek_names_are_transliterated():
+    assert to_latin("ΓΚΡΙΓΚΟΝΙΣ ΜΑΡΙΟΥΣ") == ("GRIGKONIS MARIOUS", True)  # ΓΚ = G at the start, GK inside
+    assert to_latin("ΜΠΡΑΟΥΝ ΛΟΡΕΝΤΖΟ")[0] == "BRAOUN LORENTZO"
+    assert to_latin("ΝΤΙΛΙΚΙΝΑ ΦΡΑΝΚ")[0] == "DILIKINA FRANK"
+    assert to_latin("ΤΕΪΛΟΡ ΡΑΪΑΝ")[0] == "TEILOR RAIAN"  # diaeresis: no "EI"/"AI" pair
+    assert to_latin("ΞΑΝΘΟΠΟΥΛΟΣ ΒΑΣΙΛΗΣ")[0] == "XANTHOPOULOS VASILIS"
+    assert to_latin("ΕΥΑΝΣ ΚΙΝΑΝ")[0] == "EVANS KINAN"
+    assert to_latin("ΑΥΤΟΣ")[0] == "AFTOS"  # ΑΥ before a voiceless consonant
+
+
+def test_lookalike_capitals_mixed_both_ways():
+    assert to_latin("ΤYSON WARD") == ("TYSON WARD", False)  # Latin word, Greek Τ
+    assert to_latin("AΛEK ΠITEPΣ") == ("ALEK PITERS", True)  # Greek words, Latin A, E, P
+    assert to_latin("KARAMPELAS ZOIS") == ("KARAMPELAS ZOIS", False)
 
 
 def test_display_name():

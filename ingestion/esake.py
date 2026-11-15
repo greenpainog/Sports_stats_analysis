@@ -93,12 +93,110 @@ MANUAL_PLAYER_LINKS = {
     "4C0E5F4B": "P004451",  # Giannis / Ioannis Kouzeloglou
     "7F6E6DE3": "P007866",  # Kostas / Konstantinos Mitoglou (found by the surname check)
     "52ABD8D7": "P010042",  # Jean Claudio / Jean Montero
+    # Written only in Greek letters on the 2024-25 / 2025-26 pages. Matched on
+    # the transliterated name, then checked by club and dates: none of them has
+    # Euroleague games for another club in the weeks he played in Greece.
+    "AB45FD1B": "P008829",  # Alec Peters
+    "B8E81349": "P011442",  # Alexandros Samodurov
+    "61009549": "P014741",  # Alvaro Cardenas
+    "B111BBC9": "P000956",  # Danilo Andjusic
+    "8BDDC1DE": "P013250",  # David DeJulius
+    "78F9CAB0": "P011194",  # Filip Petrusev
+    "3E67D9D0": "P006591",  # Frank Ntilikina
+    "AA38A9DC": "P013383",  # Wenyen Gabriel
+    "8E3AD877": "P005161",  # Ioannis Papapetrou
+    "CCA46AB9": "P011284",  # Kenneth Faried
+    "E2C7A697": "P011218",  # Keenan Evans
+    "7923E460": "P014220",  # Chris Silva
+    "5785DE89": "P009622",  # Lorenzo Brown
+    "6781D158": "P007947",  # Luca Vildoza
+    "DC12D2F3": "P002328",  # Marius Grigonis
+    "9A9260A9": "P013514",  # Nathan Mensah
+    "6B0BDE16": "P005353",  # Omer Yurtseven
+    "66DCB70A": "P014011",  # Richaun Holmes
+    "2D883EB4": "P013389",  # Saben Lee
+    "92C27E93": "P012608",  # TJ Shorts
+    "6C630C6A": "P008855",  # Thomas Walkup
+    "C49389A3": "P012878",  # Moses Wright
+    "FC26E3ED": "P007853",  # Shaquielle McKissic
+    "EC835FC9": "P007982",  # Nigel Williams-Goss
+    "3BB61443": "P014212",  # Monte Morris
 }
+# esake player id -> the real spelling, for players written only in Greek
+# letters who aren't linked to a Euroleague row (transliteration gives
+# 'Gkountgouin Tsevez' for Chavez Goodwin).
+MANUAL_NAMES = {}
 # Same surname, different people (reviewed): the Antetokounmpo and Kalaitzakis
 # brothers, and every common surname (Jones, Smith, Williams, Moore, ...).
 # Greek capitals that look like Latin ones. Pages sometimes mix them into
 # Latin text: "ΟΤ1" (overtime) and "ΤYSON WARD" both start with Greek letters.
 LOOKALIKES = str.maketrans("ΑΒΕΖΗΙΚΜΝΟΡΤΥΧ", "ABEZHIKMNOPTYX")
+
+# Greek -> Latin (ELOT 743, the Greek passport standard, which the Euroleague
+# also uses for Greek players: Rogkavopoulos, Antetokounmpo, Charalampopoulos).
+# 2024-25 and 2025-26 pages write many players only in Greek ("ΚΡΙΣ ΚΟΦΙ").
+_GREEK_LETTERS = {"Α": "A", "Β": "V", "Γ": "G", "Δ": "D", "Ε": "E", "Ζ": "Z", "Η": "I", "Θ": "TH",
+                  "Ι": "I", "Κ": "K", "Λ": "L", "Μ": "M", "Ν": "N", "Ξ": "X", "Ο": "O", "Π": "P",
+                  "Ρ": "R", "Σ": "S", "Τ": "T", "Υ": "Y", "Φ": "F", "Χ": "CH", "Ψ": "PS", "Ω": "O"}
+# Pairs; the first value is used at the start of a word (ΜΠΡΑΟΥΝ -> BRAOUN).
+_GREEK_PAIRS = {"ΟΥ": ("OU", "OU"), "ΑΙ": ("AI", "AI"), "ΕΙ": ("EI", "EI"), "ΟΙ": ("OI", "OI"),
+                "ΜΠ": ("B", "MP"), "ΝΤ": ("D", "NT"), "ΓΚ": ("G", "GK"), "ΓΓ": ("NG", "NG"),
+                "ΓΞ": ("NX", "NX"), "ΓΧ": ("NCH", "NCH"), "ΤΣ": ("TS", "TS"), "ΤΖ": ("TZ", "TZ")}
+_VOICELESS = set("ΘΚΞΠΣΤΦΧΨ")
+
+
+def _greek_word_to_latin(word):
+    """One Greek word in capitals -> Latin capitals. Accents are dropped; a
+    diaeresis (Ϊ, Ϋ) keeps the vowel separate (ΤΕΪΛΟΡ -> TEILOR)."""
+    letters, i, out = [], 0, []
+    for ch in unicodedata.normalize("NFD", word.upper()):
+        if ch == "̈" and letters:  # diaeresis: mark the previous vowel
+            letters[-1] += "̈"
+        elif not unicodedata.combining(ch):
+            letters.append(ch)
+    while i < len(letters):
+        pair = "".join(letters[i:i + 2])
+        if pair in _GREEK_PAIRS:
+            out.append(_GREEK_PAIRS[pair][0 if i == 0 else 1])
+            i += 2
+        elif pair in ("ΑΥ", "ΕΥ"):  # AV/EV, but AF/EF before a voiceless consonant or at the end
+            nxt = letters[i + 2] if i + 2 < len(letters) else None
+            out.append(pair[0].translate(LOOKALIKES) + ("F" if nxt is None or nxt in _VOICELESS else "V"))
+            i += 2
+        else:
+            ch = letters[i].replace("̈", "")
+            out.append(_GREEK_LETTERS.get(ch, ch))
+            i += 1
+    return "".join(out)
+
+
+def to_latin(text):
+    """(Latin text, transliterated?) for a name from a page.
+
+    Pages mix lookalike capitals both ways: "ΤYSON" (Latin, Greek Τ) and
+    "AΛEK" (Greek, Latin A and E). A letter only one alphabet has (Λ, Π, Σ / L,
+    R, S) decides; a word of lookalikes only goes with most of its letters.
+    """
+    words, transliterated = [], False
+    for word in text.split():
+        greek = sum(1 for ch in word if _is_greek(ch))
+        latin = sum(1 for ch in word if ch.isascii() and ch.isalpha())
+        greek_only = any(_is_greek(ch) and ch.upper() not in _LOOKALIKE_GREEK for ch in word)
+        latin_only = any(ch.isascii() and ch.isalpha() and ch.upper() not in _LOOKALIKE_LATIN for ch in word)
+        if greek and (greek_only or (not latin_only and greek > latin)):
+            words.append(_greek_word_to_latin(word.upper().translate(_LATIN_TO_GREEK)))
+            transliterated = True
+        else:
+            words.append(word.translate(LOOKALIKES))
+    return " ".join(words), transliterated
+
+
+_LOOKALIKE_GREEK, _LOOKALIKE_LATIN = "ΑΒΕΖΗΙΚΜΝΟΡΤΥΧ", "ABEZHIKMNOPTYX"
+_LATIN_TO_GREEK = str.maketrans(_LOOKALIKE_LATIN, _LOOKALIKE_GREEK)
+
+
+def _is_greek(ch):
+    return "Ͱ" <= ch <= "Ͽ" or "ἀ" <= ch <= "῿"
 
 
 # --- Download ----------------------------------------------------------------
@@ -177,6 +275,7 @@ class Line:
     raw_name: str = None  # as on the page, e.g. "NOLLEY II LANDERS"
     number: str = None
     source_player_id: str = None
+    transliterated: bool = False  # name was written in Greek letters on the page
 
 
 @dataclass
@@ -261,9 +360,10 @@ def _parse_box(rows, team_name, team_id):
             player_cell = row[0]
             match = re.search(r"idplayer=(\w+)", player_cell["href"] or "")
             number = re.match(r"#(\d+)", label)
-            raw = re.sub(r"^#\d+\s*", "", label).translate(LOOKALIKES)
-            surname = " ".join((player_cell["span"] or raw.split()[0]).translate(LOOKALIKES).split())
+            raw, transliterated = to_latin(re.sub(r"^#\d+\s*", "", label))
+            surname = to_latin(player_cell["span"])[0] if player_cell["span"] else raw.split()[0]
             box.players.append(Line(_line(row[1:]), name=display_name(raw, surname), raw_name=raw,
+                                    transliterated=transliterated,
                                     number=number.group(1) if number else None,
                                     source_player_id=match.group(1) if match else None))
     if box.totals is None:
@@ -395,7 +495,7 @@ def build_game_bundle(game, season):
             if not line.values.get("minutes"):
                 continue  # listed but did not play
             player = {"name": line.name, "source_player_id": line.source_player_id,
-                      "aliases": [line.raw_name]}
+                      "aliases": [line.raw_name], "transliterated": line.transliterated}
             appearances.append({"team": side, "player": player})  # the page doesn't mark starters
             stats.extend(_items(line.values, "player", side, player))
         team_values = dict(box.totals.values)
@@ -507,9 +607,29 @@ def ingest_game(idgame, season, download=True):
     try:
         link_teams(conn)
         linked, review = link_players(conn, bundle)
+        _keep_known_spellings(conn, bundle)
     finally:
         conn.close()
     return save_game_bundle(bundle), linked, review
+
+
+def _keep_known_spellings(conn, bundle):
+    """A transliterated name never replaces a saved one, or MANUAL_NAMES.
+
+    Saving a game renames a known player to that game's spelling, so loading
+    2024-25 (Greek letters) after 2026-27 would turn 'Chavez Goodwin' back into
+    'Gkountgouin Tsavez'. Latin spellings from newer pages still win.
+    """
+    for appearance in bundle["appearances"]:
+        player = appearance["player"]
+        if player.pop("transliterated", False):
+            if player["source_player_id"] in MANUAL_NAMES:
+                player["name"] = MANUAL_NAMES[player["source_player_id"]]
+                continue
+            row = conn.execute("SELECT name FROM players WHERE source = ? AND source_player_id = ?",
+                               (SOURCE, player["source_player_id"])).fetchone()
+            if row:
+                player["name"] = row[0]
 
 
 def _round_page(championship, series, download=True):
