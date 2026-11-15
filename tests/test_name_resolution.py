@@ -34,6 +34,9 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(normalize_name("Đorđević"), "dordevic")
         self.assertEqual(normalize_name("NUNN, KENDRICK"), "nunn kendrick")
         self.assertEqual(normalize_name("  "), "")
+        self.assertEqual(normalize_name("Pana's"), "pana")
+        self.assertEqual(normalize_name("Nunn’s"), "nunn")
+        self.assertEqual(normalize_name("O'Shea"), "o shea")  # an apostrophe inside a name stays a split
 
     def test_player_name_variants(self):
         self.assertEqual(

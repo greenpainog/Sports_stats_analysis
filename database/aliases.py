@@ -25,12 +25,14 @@ FUZZY_CUTOFF = 0.85
 
 
 def normalize_name(text):
-    """'Žalgiris  Kaunas' -> 'zalgiris kaunas'; 'R. Madrid' -> 'r madrid'."""
+    """'Žalgiris  Kaunas' -> 'zalgiris kaunas'; 'R. Madrid' -> 'r madrid'; "Nunn's" -> 'nunn'."""
     if not text:
         return ""
     text = unicodedata.normalize("NFKD", text.translate(_EXTRA_LETTERS))
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    text = re.sub(r"[^a-z0-9]+", " ", text.lower())
+    # A possessive is not part of the name: "Pana's" -> "pana", "Nunn’s" -> "nunn".
+    text = re.sub(r"['’]s\b", "", text.lower())
+    text = re.sub(r"[^a-z0-9]+", " ", text)
     return " ".join(text.split())
 
 
