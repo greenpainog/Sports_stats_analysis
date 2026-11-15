@@ -10,6 +10,7 @@ from typing import Annotated, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 
+from analysis.player_rankings import RANKABLE_PLAYER_STATS
 from analysis.rankings import RANKABLE_TEAM_STATS
 from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS, RESULT_STATS
 
@@ -317,3 +318,76 @@ class MatchupResponse(BaseModel):
     team_a: RankingRow
     team_b: RankingRow
     answer: str = Field(description="A readable side-by-side table.")
+
+
+# --- Player rankings ---------------------------------------------------------
+
+PlayerStatName = Literal[RANKABLE_PLAYER_STATS]
+
+
+class PlayerRankingSpec(BaseModel):
+    """Rank every player with enough matching games."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stats: Optional[list[PlayerStatName]] = Field(
+        None, min_length=1, description="Stats to rank on; null means every player stat. Rows are sorted by the first."
+    )
+    season: Optional[SeasonName] = None
+    phase: Optional[Phase] = None
+    venue: Optional[Venue] = None
+    result: Optional[Literal["won", "lost"]] = None
+    max_margin: Optional[int] = Field(None, ge=1, le=50, description="Only games decided by at most this many points.")
+    last_n: Optional[int] = Field(None, ge=1, le=100, description="Each player's N most recent matching games.")
+    team: Optional[str] = Field(None, description="Only players' games for this team.")
+    per: Literal["game", "total", "per40"] = Field("game", description="Per game, totals or per 40 minutes.")
+    min_games: Optional[int] = Field(
+        None, ge=0, le=100,
+        description="Games needed to be ranked; null = half the games of the most active player, rounded up.",
+    )
+    min_minutes: Optional[float] = Field(None, ge=0, le=40, description="Minutes per game needed to be ranked.")
+    limit: Optional[int] = Field(50, ge=1, le=500, description="Rows returned; ranks are still out of everyone ranked.")
+
+    @model_validator(mode="after")
+    def check_stats(self):
+        if self.stats and len(set(self.stats)) != len(self.stats):
+            raise ValueError("Each stat may be listed only once.")
+        return self
+
+
+class PlayerProfileSpec(PlayerRankingSpec):
+    """One player's value and rank in every stat."""
+
+    player: str = Field(description="Player name, e.g. 'Nunn'.")
+    limit: Optional[int] = Field(None, description="Ignored for a profile.")
+
+
+class PlayerRankingRow(BaseModel):
+    player: str
+    team: str = Field(description="Latest team in the matching games.")
+    games: int
+    minutes_per_game: float
+    qualified: bool = Field(description="False when below min_games/min_minutes: values but no ranks.")
+    values: dict[str, Optional[float]]
+    ranks: dict[str, Optional[int]]
+    summary: dict[str, StatSummary]
+
+
+class PlayerRankingsResponse(BaseModel):
+    stats: list[str]
+    filters: dict
+    per: str
+    min_games: int = Field(description="The minimum that was applied.")
+    ranked_count: int = Field(description="Ranks are out of this many players.")
+    unranked: int = Field(description="Players left out by the minimum.")
+    players: list[PlayerRankingRow]
+
+
+class PlayerProfileResponse(BaseModel):
+    stats: list[str]
+    filters: dict
+    per: str
+    min_games: int
+    ranked_count: int
+    player: PlayerRankingRow
+    answer: str

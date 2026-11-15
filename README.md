@@ -110,6 +110,19 @@ Advanced team stats (`analysis/advanced.py`), computed from summed box-score tot
 `stl_pct` and `blk_pct`. Possessions = FGA − OREB + TOV + 0.44 × FTA, averaged over both teams.
 Other sites use slightly different possession formulas, so their numbers can differ a little.
 
+**Player rankings.** `POST /player-rankings` ranks players on 47 stats; `POST /player-profile`
+shows one player's value and rank in all of them (`{"player": "Nunn", "season": "2026-27"}`).
+- Traditional: every box-score stat plus fg2/fg3/ft/fg %, win_pct; `per` is `game`, `total` or `per40`.
+- Advanced: `ts_pct`, `efg_pct`, `usage_pct`, `ast_pct`, `oreb_pct`, `dreb_pct`, `reb_pct`, `tov_pct`,
+  `stl_pct`, `blk_pct`, `ast_to`. Shares of team plays count only the time he was on the floor.
+- Scoring: `pts_from_2pt_pct`, `pts_from_3pt_pct`, `pts_from_ft_pct`, `points_per_fga`, `fg3a_rate`,
+  `ft_rate`, `team_pts_share`.
+- Misc: `double_doubles`, `triple_doubles`, `starts`, `games_20_points`, `plus_minus`, `fouls_received`, `pir`.
+
+Only players with enough games are ranked: by default half the games of the most active player,
+rounded up (`min_games` overrides it). Use `min_minutes` for shooting stats, or low-volume players
+top them. Filters as for teams, plus `team`; `limit` (default 50) trims rows, not ranks.
+
 The database path defaults to `data/sports_analytics.db` in the project folder;
 set the `SPORTS_DB_PATH` environment variable to use another file.
 

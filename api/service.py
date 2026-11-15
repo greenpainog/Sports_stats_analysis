@@ -1,13 +1,19 @@
 """Run a validated QuerySpec, including comparisons. Used by /query, /ask and the eval."""
 from dataclasses import asdict
 
-from analysis.advanced import ADVANCED_TEAM_STATS
+from analysis.advanced import ADVANCED_PLAYER_STATS, ADVANCED_TEAM_STATS
+from analysis.player_rankings import player_profile, player_rankings
 from analysis.rankings import matchup, team_rankings
 from analysis.stat_query import query_stats
 from api.models import (
     ComparisonSide,
     MatchupResponse,
     MatchupSpec,
+    PlayerProfileResponse,
+    PlayerProfileSpec,
+    PlayerRankingRow,
+    PlayerRankingSpec,
+    PlayerRankingsResponse,
     QueryResponse,
     QuerySpec,
     RankingRow,
@@ -102,3 +108,42 @@ def matchup_spec(spec: MatchupSpec) -> MatchupResponse:
     r = m.rankings
     return MatchupResponse(stats=r.stats, filters=r.filters, per=r.per, side=r.side, team_count=len(r.teams),
                            team_a=_row(m.team_a), team_b=_row(m.team_b), answer=matchup_text(m))
+
+
+# --- Player rankings ---------------------------------------------------------
+
+def _player_row(row) -> PlayerRankingRow:
+    return PlayerRankingRow(player=row.player, team=row.team, games=row.games,
+                            minutes_per_game=row.minutes_per_game, qualified=row.qualified,
+                            values=row.values, ranks=row.ranks,
+                            summary={stat: asdict(s) for stat, s in row.summary.items()})
+
+
+def _player_decimals(stat):
+    return ADVANCED_PLAYER_STATS[stat].decimals if stat in ADVANCED_PLAYER_STATS else 1
+
+
+def player_rankings_spec(spec: PlayerRankingSpec) -> PlayerRankingsResponse:
+    r = player_rankings(**spec.model_dump())
+    return PlayerRankingsResponse(stats=r.stats, filters=r.filters, per=r.per, min_games=r.min_games,
+                                  ranked_count=r.ranked_count, unranked=r.unranked,
+                                  players=[_player_row(row) for row in r.players])
+
+
+def profile_text(p) -> str:
+    row, r = p.player, p.rankings
+    head = f"{row.player} ({row.team}), {row.games} games, {row.minutes_per_game:.1f} min per game"
+    if not row.qualified:
+        head += f": not ranked, needs {r.min_games}+ games"
+    lines = [head + f"; ranks out of {r.ranked_count} players:"]
+    width = max(len(stat) for stat in r.stats)
+    for stat in r.stats:
+        lines.append(f"  {stat:<{width}}  {_cell(row.values[stat], row.ranks[stat], r.ranked_count, _player_decimals(stat))}")
+    return "\n".join(lines)
+
+
+def player_profile_spec(spec: PlayerProfileSpec) -> PlayerProfileResponse:
+    p = player_profile(**spec.model_dump(exclude={"limit"}))
+    r = p.rankings
+    return PlayerProfileResponse(stats=r.stats, filters=r.filters, per=r.per, min_games=r.min_games,
+                                 ranked_count=r.ranked_count, player=_player_row(p.player), answer=profile_text(p))

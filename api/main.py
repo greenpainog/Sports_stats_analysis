@@ -17,13 +17,17 @@ from analysis.stat_query import (
     RESULT_STATS,
     QueryError,
 )
-from api.service import answer_spec, matchup_spec, rankings_spec
+from api.service import answer_spec, matchup_spec, player_profile_spec, player_rankings_spec, rankings_spec
 from api.models import (
     AskRequest,
     AskResponse,
     ErrorResponse,
     MatchupResponse,
     MatchupSpec,
+    PlayerProfileResponse,
+    PlayerProfileSpec,
+    PlayerRankingSpec,
+    PlayerRankingsResponse,
     QueryResponse,
     QuerySpec,
     RankingSpec,
@@ -101,6 +105,22 @@ def rankings(spec: RankingSpec):
 def team_matchup(spec: MatchupSpec):
     """Two teams side by side with their league rank for every stat, e.g. before they play each other."""
     return matchup_spec(spec)
+
+
+@app.post("/player-rankings", response_model=PlayerRankingsResponse)
+def rank_players(spec: PlayerRankingSpec):
+    """Every qualified player's value and rank for each stat: traditional, advanced, scoring and misc."""
+    return player_rankings_spec(spec)
+
+
+@app.post(
+    "/player-profile",
+    response_model=PlayerProfileResponse,
+    responses={400: {"model": ErrorResponse, "description": "Unknown or ambiguous player, or no games"}},
+)
+def profile(spec: PlayerProfileSpec):
+    """One player's value and league rank in every stat."""
+    return player_profile_spec(spec)
 
 
 @lru_cache
