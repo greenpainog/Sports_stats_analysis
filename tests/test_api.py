@@ -216,3 +216,9 @@ def test_player_threshold_unknown_player_is_400(client):
         "stats": ["total_rebounds"], "team": "Alpha",
         "player_threshold": {"player": "Nobody Atall", "stat": "minutes", "min": 10}})
     assert response.status_code == 400
+
+
+def test_compare_side_that_names_the_default_competition_is_a_real_side():
+    spec = QuerySpec(stats=["assists"], player="Shooter", compare=[
+        {"label": "EL", "competition": "euroleague"}, {"label": "GBL", "competition": "greek_league"}])
+    assert [s.competition for _, s in spec.side_specs()] == ["euroleague", "greek_league"]

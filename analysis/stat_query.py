@@ -49,6 +49,38 @@ RESULT_STATS = ("win_pct",)
 
 VENUES = ("home", "away", "neutral")
 
+# Competition name in a spec -> competitions.source_competition_id.
+COMPETITIONS = {"euroleague": "E", "greek_league": "GBL"}
+COMPETITION_SQL = """tg.season_id IN (SELECT s.id FROM seasons s JOIN competitions c ON c.id = s.competition_id
+                                      WHERE c.source_competition_id = ?)"""
+
+
+def competition_where(competition):
+    """(SQL condition on team_games tg, params) for one competition."""
+    if competition not in COMPETITIONS:
+        raise QueryError(f"competition must be one of {', '.join(COMPETITIONS)}.")
+    return COMPETITION_SQL, [COMPETITIONS[competition]]
+
+
+_stored_cache = {}
+
+
+def stored_stats(conn, competition, entity_type=None):
+    """Stat names stored for this competition's games (the Greek league has no
+    plus_minus or shot-list stats). Cached until the number of games changes."""
+    import database.db as db
+
+    games = conn.execute("SELECT COUNT(*), MAX(id) FROM games").fetchone()
+    key = (db.DATABASE_FILE, competition, entity_type, *games)
+    if key not in _stored_cache:
+        sql = f"""SELECT DISTINCT stat_name FROM game_stats WHERE game_id IN (
+                     SELECT g.id FROM games g JOIN seasons s ON s.id = g.season_id
+                     JOIN competitions c ON c.id = s.competition_id WHERE c.source_competition_id = ?)
+                  {"AND entity_type = ?" if entity_type else ""}"""
+        params = [COMPETITIONS[competition]] + ([entity_type] if entity_type else [])
+        _stored_cache[key] = {row[0] for row in conn.execute(sql, params)}
+    return _stored_cache[key]
+
 
 class QueryError(ValueError):
     """The question cannot be answered as asked (unknown name, bad filter, ...).
@@ -126,8 +158,9 @@ def _resolve(resolver, text, label):
 
 # One row per team per game. Neutral-venue games are neither home nor away.
 # rest_hours: hours since this team's previous game in the database (NULL for
-# its first game). Only games we have count, so a domestic-league game in
-# between is invisible: this is rest between *loaded* games, an upper bound.
+# its first game), in any loaded competition: a Panathinaikos Greek league game
+# on Sunday makes its Euroleague game on Tuesday short rest. Leagues that are
+# not loaded are invisible, so for other clubs this is an upper bound.
 TEAM_GAMES_CTE = """
 WITH sides AS (
     SELECT g.id AS game_id, g.season_id, g.start_time, g.phase,
@@ -174,6 +207,7 @@ def query_stats(
     season=None,
     seasons=None,
     phase=None,
+    competition="euroleague",
     max_rest_hours=None,
     min_rest_hours=None,
     player_threshold=None,
@@ -196,10 +230,12 @@ def query_stats(
     season: season name such as "2024-25". seasons: several season names,
         e.g. ["2025-26", "2026-27"]; not with `season`.
     phase: e.g. "regular_season".
+    competition: "euroleague" (default) or "greek_league". A player in both
+        leagues is one player; this decides which games count.
     max_rest_hours / min_rest_hours: hours since the subject's team played
         its previous loaded game (e.g. max_rest_hours=48 for two games within
         48 hours). A team's first loaded game has no rest value and is left
-        out by these filters. Only loaded competitions count (see above).
+        out by these filters. Games in every loaded league count (see above).
     player_threshold: {"player", "stat", "min", "max"}: only games in which
         this player played and his `stat` in that game was at least `min`
         and/or at most `max` (both inclusive), e.g. Lessort, minutes, min 30.
@@ -232,8 +268,11 @@ def query_stats(
 
     conn = get_connection()
     try:
-        _check_stats(conn, stats)
-        filters, where, params = {}, [], []
+        competition_sql, competition_params = competition_where(competition)
+        _check_stats(conn, stats, competition)
+        filters, where, params = {}, [competition_sql], list(competition_params)
+        if competition != "euroleague":
+            filters["competition"] = competition
 
         if player is not None:
             subject_id, subject = _resolve(lambda t: resolve_player(t, conn), player, "player")
@@ -364,12 +403,13 @@ def query_stats(
     return result
 
 
-def _check_stats(conn, stats):
-    stored = {row[0] for row in conn.execute("SELECT DISTINCT stat_name FROM game_stats")}
-    unknown = [s for s in stats if s not in stored and s not in PERCENTAGE_STATS
-               and s not in RESULT_STATS]
+def _check_stats(conn, stats, competition="euroleague"):
+    stored = stored_stats(conn, competition)
+    unknown = [s for s in stats if s not in RESULT_STATS and not (
+        s in stored or (s in PERCENTAGE_STATS and set(sum(PERCENTAGE_STATS[s], ())) <= stored))]
     if unknown:
-        raise QueryError(f"Unknown stat(s): {', '.join(unknown)}.")
+        where = "" if competition == "euroleague" else f" for the {competition.replace('_', ' ')}"
+        raise QueryError(f"Unknown stat(s){where}: {', '.join(unknown)}.")
 
 
 def _load_values(conn, subject_type, subject_id, game_ids):

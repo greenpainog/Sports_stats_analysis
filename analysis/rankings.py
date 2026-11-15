@@ -23,6 +23,8 @@ from analysis.stat_query import (
     _check_stats,
     _resolve,
     _summarise,
+    competition_where,
+    stored_stats,
 )
 from database.aliases import resolve_team
 from database.db import get_connection
@@ -111,6 +113,7 @@ def team_rankings(
     per="game",
     side="team",
     order="highest",
+    competition="euroleague",
 ):
     """Rank every team that has matching games.
 
@@ -148,7 +151,10 @@ def team_rankings(
     if side == "opponent" and "win_pct" in stats:
         raise QueryError("win_pct is the team's own record; use side 'team'.")
 
-    filters, where, params = {}, [], []
+    competition_sql, competition_params = competition_where(competition)
+    filters, where, params = {}, [competition_sql], list(competition_params)
+    if competition != "euroleague":
+        filters["competition"] = competition
     if season is not None:
         filters["season"] = season
         where.append("tg.season_id IN (SELECT id FROM seasons WHERE name = ?)")
@@ -187,15 +193,14 @@ def team_rankings(
     conn = get_connection()
     try:
         if all_stats:
-            stored = {row[0] for row in conn.execute(
-                "SELECT DISTINCT stat_name FROM game_stats WHERE entity_type = 'team'")}
+            stored = stored_stats(conn, competition, "team")
             stats = [s for s in stats if s in stored or s in RESULT_STATS or (
                 s in PERCENTAGE_STATS and set(sum(PERCENTAGE_STATS[s], ())) <= stored) or (
                 s in ADVANCED_TEAM_STATS and set(ADVANCED_TEAM_STATS[s].needs) <= stored)]
         # An advanced stat is checked through the stored stats its formula reads.
         needed = {need for s in stats if s in ADVANCED_TEAM_STATS for need in ADVANCED_TEAM_STATS[s].needs}
         _check_stats(conn, sorted(needed | {s for s in stats if s not in RESULT_STATS
-                                            and s not in ADVANCED_TEAM_STATS}))
+                                            and s not in ADVANCED_TEAM_STATS}), competition)
         games = conn.execute(sql, params).fetchall()
         # Both sides' team rows for the matching games (at most ~850 ids, under SQLite's limit).
         game_ids = sorted({row[0] for row in games})

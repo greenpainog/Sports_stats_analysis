@@ -19,6 +19,11 @@ from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS, RESULT_STATS
 StatName = Literal[COUNTING_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS]
 CountingStatName = Literal[COUNTING_STATS]
 Venue = Literal["home", "away", "neutral"]
+Competition = Literal["euroleague", "greek_league"]
+COMPETITION_DESCRIPTION = (
+    "Which league's games: 'euroleague' (default) or 'greek_league' (Stoiximan GBL). "
+    "A player or club in both leagues is one subject; this picks the games."
+)
 SeasonName = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}$")]
 Phase = Literal["regular_season", "play_in", "playoffs", "final_four"]
 
@@ -63,6 +68,7 @@ class Filters(BaseModel):
     against_player: Optional[str] = Field(
         None, description="Only games in which this player played for the opponent, e.g. 'against Theis'."
     )
+    competition: Competition = Field("euroleague", description=COMPETITION_DESCRIPTION)
     season: Optional[SeasonName] = Field(None, description="Season such as '2024-25'.")
     seasons: Optional[list[SeasonName]] = Field(
         None, min_length=2, max_length=10,
@@ -73,7 +79,7 @@ class Filters(BaseModel):
         None, gt=0, le=24 * 365,
         description=(
             "Only games played at most this many hours after the team's previous game, "
-            "e.g. 48 for back-to-back weeks. Counts loaded (Euroleague) games only."
+            "e.g. 48 for back-to-back weeks. Counts games in every loaded league (Euroleague and Greek league)."
         ),
     )
     min_rest_hours: Optional[float] = Field(
@@ -151,6 +157,10 @@ class QuerySpec(Filters):
         sides, seen = [], set()
         for side in self.compare or []:
             own = side.model_dump(exclude={"label"}, exclude_defaults=True)
+            # A side that says "Euroleague" (the default) still sets something:
+            # "in the Euroleague vs in the Greek league" has two real sides.
+            if "competition" in side.model_fields_set:
+                own["competition"] = side.competition
             if not own:
                 raise ValueError("Each compare side needs at least one filter.")
             key = json.dumps(own, sort_keys=True)
@@ -268,6 +278,7 @@ class RankingSpec(BaseModel):
     stats: Optional[list[TeamStatName]] = Field(
         None, min_length=1, description="Stats to rank on; null means every team stat. Rows are sorted by the first."
     )
+    competition: Competition = Field("euroleague", description=COMPETITION_DESCRIPTION)
     season: Optional[SeasonName] = Field(None, description="Season such as '2026-27'; null means all loaded seasons.")
     phase: Optional[Phase] = None
     venue: Optional[Venue] = Field(None, description="Only each team's home (or away, neutral) games.")
@@ -341,6 +352,7 @@ class PlayerRankingSpec(BaseModel):
     stats: Optional[list[PlayerStatName]] = Field(
         None, min_length=1, description="Stats to rank on; null means every player stat. Rows are sorted by the first."
     )
+    competition: Competition = Field("euroleague", description=COMPETITION_DESCRIPTION)
     season: Optional[SeasonName] = None
     phase: Optional[Phase] = None
     venue: Optional[Venue] = None

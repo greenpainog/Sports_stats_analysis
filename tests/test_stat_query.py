@@ -49,7 +49,7 @@ def _game(code, day, home, away, home_score, away_score, neutral=False, alpha_pl
         stats += _player_stats(player, alpha_side, made3, att3, assists)
     return {
         "source": "test", "source_game_id": f"g{code}",
-        "competition": {"name": "Test League", "source_competition_id": "T"},
+        "competition": {"name": "Test League", "source_competition_id": "E"},  # stands in for the Euroleague
         "season": {"name": season},
         "home_team": TEAMS[home], "away_team": TEAMS[away],
         "start_time": f"{day}T19:00:00Z",

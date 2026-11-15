@@ -3,8 +3,20 @@ from database.db import get_connection
 
 
 def _find_or_create_named_row(cursor, table, name, source, source_id, extra=None):
-    """Return a row ID, using the Flashscore ID when it is available."""
+    """Return a row ID, using the source's own ID when it is available.
+
+    A source ID listed in source_links belongs to an existing row from another
+    source (the same player in two leagues); that row keeps its name.
+    """
     extra = extra or {}
+    if source_id is not None:
+        cursor.execute(
+            "SELECT entity_id FROM source_links WHERE kind = ? AND source = ? AND source_id = ?",
+            (table[:-1], source, str(source_id)),
+        )
+        linked = cursor.fetchone()
+        if linked:
+            return linked[0]
 
     # Table and column names here come from this module, never from user input.
     if source_id is not None:
@@ -368,3 +380,13 @@ def save_match_data(match_data):
 
     conn.commit()
     conn.close()
+
+
+def link_source_id(cursor, kind, source, source_id, entity_id, method):
+    """Send `source`'s ID for a team or player to an existing row (see source_links)."""
+    cursor.execute(
+        """INSERT INTO source_links (kind, source, source_id, entity_id, method) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(kind, source, source_id) DO UPDATE SET entity_id = excluded.entity_id,
+               method = excluded.method""",
+        (kind, source, str(source_id), entity_id, method),
+    )

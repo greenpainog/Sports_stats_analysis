@@ -31,6 +31,8 @@ from analysis.stat_query import (
     _check_stats,
     _resolve,
     _summarise,
+    competition_where,
+    stored_stats,
 )
 from database.aliases import resolve_player, resolve_team
 from database.db import get_connection
@@ -82,6 +84,7 @@ def player_rankings(
     min_minutes=None,
     limit=None,
     order="highest",
+    competition="euroleague",
 ):
     """Rank every player with enough matching games.
 
@@ -115,7 +118,10 @@ def player_rankings(
     if min_games is not None and min_games < 0 or min_minutes is not None and min_minutes < 0:
         raise QueryError("min_games and min_minutes can't be negative.")
 
-    filters, where, params = {}, [], []
+    competition_sql, competition_params = competition_where(competition)
+    filters, where, params = {}, [competition_sql], list(competition_params)
+    if competition != "euroleague":
+        filters["competition"] = competition
     conn = get_connection()
     try:
         if team is not None:
@@ -146,16 +152,14 @@ def player_rankings(
             filters["last_n"] = last_n
         where.append("tg.team_score IS NOT NULL AND tg.opponent_score IS NOT NULL")
 
-        stored = {row[0] for row in conn.execute(
-            "SELECT DISTINCT stat_name FROM game_stats WHERE entity_type = 'player'")}
-        stored_team = {row[0] for row in conn.execute(
-            "SELECT DISTINCT stat_name FROM game_stats WHERE entity_type = 'team'")}
+        stored = stored_stats(conn, competition, "player")
+        stored_team = stored_stats(conn, competition, "team")
         if all_stats:
             stats = [s for s in stats if _available(s, stored, stored_team)]
         missing = [s for s in stats if not _available(s, stored, stored_team)]
         if missing:
             raise QueryError(f"Unknown stat(s) for this database: {', '.join(missing)}.")
-        _check_stats(conn, [s for s in stats if s in COUNTING_STATS])
+        _check_stats(conn, [s for s in stats if s in COUNTING_STATS], competition)
 
         games = conn.execute(f"""{TEAM_GAMES_CTE},
             picked AS (

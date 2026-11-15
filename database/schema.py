@@ -212,6 +212,21 @@ def create_tables():
                 f"ON {kind}_aliases(normalized)"
             )
 
+        # One person or club seen by several sources (Kendrick Nunn in the
+        # Euroleague and the Greek league) is one row. A link sends another
+        # source's ID to that existing row; method is 'manual' (hand-written
+        # list) or 'name' (exact name match, see ingestion/esake.py).
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS source_links (
+                kind TEXT NOT NULL CHECK (kind IN ('team', 'player')),
+                source TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                method TEXT NOT NULL,
+                PRIMARY KEY (kind, source, source_id)
+            )
+        """)
+
         cursor.execute("CREATE INDEX IF NOT EXISTS ix_games_start_time ON games(start_time)")
         cursor.execute("CREATE INDEX IF NOT EXISTS ix_games_season_time ON games(season_id, start_time)")
         cursor.execute("CREATE INDEX IF NOT EXISTS ix_game_stats_name ON game_stats(stat_name)")

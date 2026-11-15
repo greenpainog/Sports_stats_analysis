@@ -38,7 +38,7 @@ def _bundle(code, lines, minutes):
         stats += [{"entity_type": "team", "team": side, "stat_name": k, "stat_value": v} for k, v in values.items()]
     return {
         "source": "test", "source_game_id": f"adv{code}",
-        "competition": {"name": "Test League", "source_competition_id": "T"},
+        "competition": {"name": "Test League", "source_competition_id": "E"},
         "season": {"name": "2024-25"},
         "home_team": {"name": "Home Club", "source_team_id": "H"},
         "away_team": {"name": "Away Club", "source_team_id": "A"},
