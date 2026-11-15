@@ -125,7 +125,39 @@ MANUAL_PLAYER_LINKS = {
 # esake player id -> the real spelling, for players written only in Greek
 # letters who aren't linked to a Euroleague row (transliteration gives
 # 'Gkountgouin Tsevez' for Chavez Goodwin).
-MANUAL_NAMES = {}
+# Worked out by hand from the Greek spelling and the club; players I couldn't
+# identify with confidence keep the transliteration (correct them here).
+MANUAL_NAMES = {
+    "139F0EBB": "Gabriel Galvanini", "405192E7": "Cameron Reynolds", "2A79ECAD": "Mindaugas Kuzminskas",
+    "0B4BA1C7": "Kendrick Ray", "88A8B311": "Nate Watson", "F2C4F5E2": "Andrew Goudelock",
+    "D8AAA670": "Marko Pecarski", "2D7697E1": "Prentiss Hubb", "91A60582": "Grant Golden",
+    "C33BFBFA": "Hunter Hale", "9B095932": "Elvar Fridriksson", "52E19D5D": "Wes Iwundu",
+    "F06E1579": "Rashad Vaughn", "7B8D6590": "Shavar Reynolds", "9FFCB24C": "Dan Akin",
+    "6A0C83E7": "Jake VanTubbergen", "2C0B2DE8": "Trevon Allen", "FFF395A0": "Chavez Goodwin",
+    "A526A086": "Jarell Eddie", "FC6A957C": "Ryan Woolridge", "BCAE1788": "Devin Davis",
+    "4BAE384D": "Brandon Jefferson", "56ACC9C5": "Damien Jefferson", "A65676A5": "CJ Bryce",
+    "915AFB05": "Cyril Langevine", "9C923A09": "Josh Roberts", "025BC51F": "Landry Nnoko",
+    "53E8F901": "Jacorey Williams", "899F2E06": "Langston Hall", "6E6CF8F4": "Myles Hesson",
+    "C8E63EEC": "Brandon Slater", "02211B0A": "Rion Brown", "BD97A63B": "Alexander Madsen",
+    "24D310BE": "Kenny Williams", "B992196A": "Taz Sherman", "4517CD53": "Amine Noua",
+    "0949B704": "Sam Griffin", "67B12642": "Tobin Carberry", "22136494": "Daryl Macon",
+    "7CFC487F": "Simi Shittu", "BA572D1F": "Nick McGlynn", "8FAF270E": "Oleksandr Lypovyy",
+    "17958650": "Justin Wright-Foreman", "694251BC": "Shahada Wells", "514FA5E4": "Marcus Keene",
+    "B4466CDD": "Sharife Cooper", "645F5095": "Rob Gray", "64243210": "LJ Figueroa",
+    "EE4F4DEC": "Kyle Foster", "C46AB3E9": "Chasson Randle", "551A78E6": "Isaiah Reese",
+    "558B338D": "Riley Abercrombie", "A93771DC": "Tyler Nelson", "C2B1E86B": "JP Macura",
+    "F816BB2E": "Markel Starks", "201D9D5C": "Miroslav Raduljica", "F972EF29": "Steven Enoch",
+    "EBD85CCA": "Ahmed Hill", "CEB2F808": "Warren Washington", "00000339": "Patrick Beverley",
+    "8DD008E0": "Nate Laszewski", "61FA1CC2": "Josiah Strong", "B3D545F0": "Shakur Juiston",
+    "9B3A6626": "Jordan Tucker", "F6449AB4": "Jaylen Hands", "51D6DE99": "Paulius Danusevicius",
+    "00047A7D": "Ryan Taylor", "0C71621C": "Marcus Thornton", "2F41166C": "Kendall Smith",
+    "B88F05D1": "Jordan Davis", "833F16B8": "Ismael Sanogo", "B1496F92": "Chad Brown",
+    "B80002A2": "Donovan Jackson", "4AE48ED4": "Dewan Hernandez", "015493AB": "Darius Perry",
+    "A33E8C47": "Mojave King", "0BBCFBD3": "Jeremy Evans", "3BC0C2B5": "Mike Bothwell",
+    "779434DD": "Rayjon Tucker", "6DC2622D": "Gorjok Gak", "C39EFC18": "Joshua Obiesie",
+    "BD12A9AD": "Josh Adams", "3183C90C": "Jacob Grandison", "6C0472C9": "Tim Lambrecht",
+    "DA93B593": "Rawle Alkins", "9EB41ADD": "Keron DeShields", "0C9CD259": "Ronaldo Segu",
+}
 # Same surname, different people (reviewed): the Antetokounmpo and Kalaitzakis
 # brothers, and every common surname (Jones, Smith, Williams, Moore, ...).
 # Greek capitals that look like Latin ones. Pages sometimes mix them into
@@ -486,7 +518,7 @@ def _items(values, entity_type, side, player=None):
     return items
 
 
-def build_game_bundle(game, season):
+def build_game_bundle(game, season, phase="regular_season"):
     """An EsakeGame -> a save_game_bundle() dict (same stat names as the Euroleague)."""
     check_game(game)
     appearances, stats = [], []
@@ -512,7 +544,7 @@ def build_game_bundle(game, season):
         "away_team": _team(game.away),
         "start_time": game.start_time,
         "round_number": game.round_number,
-        "phase": "regular_season",
+        "phase": phase,
         "is_neutral_venue": False,
         "status": "finished",
         "home_score": game.home_score,
@@ -599,10 +631,10 @@ def link_players(conn, bundle):
 
 # --- Loading ------------------------------------------------------------------------
 
-def ingest_game(idgame, season, download=True):
+def ingest_game(idgame, season, download=True, phase="regular_season"):
     """Save one game (linking its players first). Returns (game id, linked, review)."""
     html = fetch_game_page(idgame, download)
-    bundle = build_game_bundle(parse_game_page(html, idgame, season), season)
+    bundle = build_game_bundle(parse_game_page(html, idgame, season), season, phase)
     conn = get_connection()
     try:
         link_teams(conn)
@@ -632,14 +664,23 @@ def _keep_known_spellings(conn, bundle):
                 player["name"] = row[0]
 
 
-def _round_page(championship, series, download=True):
+PLAYOFFS = "00000002"  # esake's "Β Φάση" (second phase): quarterfinals, semifinals, finals
+
+
+def _round_page(championship, series, download=True, playoffs=False):
     """A round's game list, saved as results_<championship>_r<NN>.html.
 
-    A saved page is downloaded again only while it lists a game that has
-    started more than 3 hours ago but has no score yet.
+    With playoffs=True, `series` is a playoff series code ("201" = QF1, "401"
+    = final game 1, "" = the phase's index page) and the page is saved as
+    results_<championship>_B<series>.html. A saved page is downloaded again
+    only while it lists a game that has started more than 3 hours ago but has
+    no score yet.
     """
     global _last_request_time
-    path = RAW_DIR / f"results_{championship}_r{series:02d}.html"
+    if playoffs:
+        path = RAW_DIR / f"results_{championship}_B{series}.html"
+    else:
+        path = RAW_DIR / f"results_{championship}_r{series:02d}.html"
     season = next(s for s, c in CHAMPIONSHIPS.items() if c == championship)
     stale = path.exists() and any(
         g["start_passed"] and g["score"] is None for g in list_games(path.read_text(encoding="utf-8"), season))
@@ -648,7 +689,8 @@ def _round_page(championship, series, download=True):
         if wait > 0:
             time.sleep(wait)
         response = requests.get("https://www.esake.gr/el/action/EsakeResults", timeout=60, params={
-            "idchampionship": championship, "idteam": "", "idseason": "", "series": f"{series:02d}"})
+            "idchampionship": championship, "idteam": "", "idseason": PLAYOFFS if playoffs else "",
+            "series": series if playoffs else f"{series:02d}"})
         _last_request_time = time.monotonic()
         response.raise_for_status()
         RAW_DIR.mkdir(parents=True, exist_ok=True)
@@ -685,29 +727,53 @@ def list_games(html, season):
     return games
 
 
-def ingest_season(season, download=True, verbose=True, max_rounds=40):
+def playoff_series(html):
+    """Playoff series codes from the second phase's round list: ['201', ..., '405'].
+
+    Only quarterfinals, semifinals, the third-place game and the finals (QF1,
+    SF2, 3P, F4 ...). The second phase can also hold the play-out (PO1-PO6,
+    the relegation round) and placement games (CF1, CF2), which aren't playoffs.
+    """
+    return [code for label, code in re.findall(r"append\(new Option\('([^']*)', '(\d+)'\)", html)
+            if re.fullmatch(r"(QF|SF|F)\d+|3P", label)]
+
+
+def _ingest_games(games, season, download, phase, report):
+    finished = [g for g in games if g["score"] is not None and g["start_passed"]]
+    report["skipped"] += len(games) - len(finished)
+    for g in finished:
+        try:
+            _, linked, review = ingest_game(g["idgame"], season, download, phase)
+            report["saved"] += 1
+            report["linked"] += linked
+            report["review"] += review
+        except Exception as exc:  # keep going; report at the end
+            report["failed"].append((g["idgame"], f"{type(exc).__name__}: {exc}"))
+    return finished
+
+
+def ingest_season(season, download=True, verbose=True, max_rounds=40, playoffs=False):
     """Load every finished game of a season, round by round, until a round has none.
 
+    playoffs=True also loads the second phase (one page per series; a series
+    page with no finished games, such as an unneeded final game 5, is skipped).
     Returns a report dict: saved, skipped (not finished), failed, linked, review.
     """
     championship = CHAMPIONSHIPS[season]
     report = {"saved": 0, "skipped": 0, "failed": [], "linked": [], "review": []}
     for series in range(1, max_rounds + 1):
         games = list_games(_round_page(championship, series, download), season)
-        finished = [g for g in games if g["score"] is not None and g["start_passed"]]
-        report["skipped"] += len(games) - len(finished)
-        for g in finished:
-            try:
-                _, linked, review = ingest_game(g["idgame"], season, download)
-                report["saved"] += 1
-                report["linked"] += linked
-                report["review"] += review
-            except Exception as exc:  # keep going; report at the end
-                report["failed"].append((g["idgame"], f"{type(exc).__name__}: {exc}"))
+        finished = _ingest_games(games, season, download, "regular_season", report)
         if verbose:
             print(f"round {series:02d}: {len(finished)} finished of {len(games)}", flush=True)
         if not finished:
             break  # the first round with no finished games ends the season so far
+    if playoffs:
+        for code in playoff_series(_round_page(championship, "", download, playoffs=True)):
+            games = list_games(_round_page(championship, code, download, playoffs=True), season)
+            finished = _ingest_games(games, season, download, "playoffs", report)
+            if verbose:
+                print(f"playoff series {code}: {len(finished)} finished of {len(games)}", flush=True)
     return report
 
 
@@ -715,12 +781,13 @@ def main():
     parser = argparse.ArgumentParser(description="Load Greek Basket League games from esake.gr.")
     parser.add_argument("--season", required=True, help="Season, e.g. 2026-27 (the pages have no year)")
     parser.add_argument("--game", help="One esake game id, e.g. 51FB1AFE; omit to load the whole season")
+    parser.add_argument("--playoffs", action="store_true", help="Also load the playoffs (second phase)")
     args = parser.parse_args()
     if args.game:
         game_id, linked, review = ingest_game(args.game, args.season)
         print(f"Saved esake game {args.game} as games.id={game_id}; linked {linked}; review {review}")
         return
-    report = ingest_season(args.season)
+    report = ingest_season(args.season, playoffs=args.playoffs)
     print(f"Saved {report['saved']}, not finished {report['skipped']}, failed {len(report['failed'])}")
     for item in report["failed"]:
         print("FAILED", *item)

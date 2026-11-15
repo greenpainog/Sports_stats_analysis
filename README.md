@@ -173,9 +173,15 @@ Konstantinos Mitoglou) are listed for review and linked by hand in `ingestion/es
 **Greek-letter names.** The 2024-25 and 2025-26 pages write most players only in Greek letters
 ("ΓΚΡΙΓΚΟΝΙΣ ΜΑΡΙΟΥΣ"). These are transliterated with ELOT 743, the Greek passport standard that
 the Euroleague also uses for Greek players (`to_latin()`), so Greek players come out right. Foreign
-players linked to the Euroleague (25 reviewed by club and dates) show their Euroleague name; other
-foreign players get a phonetic spelling ("Antriou Gaountlok" for Andrew Goudelock) unless
-`MANUAL_NAMES` gives the real one. A transliterated name never replaces a saved Latin spelling.
+players linked to the Euroleague (25 reviewed by club and dates) show their Euroleague name; 87
+more have their real spelling in `MANUAL_NAMES`, worked out by hand. About 40 foreign players I
+couldn't identify keep a phonetic spelling ("Tzoouns"). The phonetic spelling stays an alias, so
+"Gaountlok" still finds Andrew Goudelock. A transliterated name never replaces a saved Latin spelling.
+
+**Playoffs.** `--playoffs` also loads the second phase ("Β Φάση"), one page per series code
+(QF1 = 201 … F5 = 405). Only quarterfinals, semifinals, the third-place game and the finals are
+loaded, with `phase: "playoffs"`; the 2024-25 play-out (relegation round) and placement games are
+left out.
 
 **Which league.** Every query, ranking and `/ask` question has `competition`: `"euroleague"`
 (the default) or `"greek_league"`, so Euroleague answers never include Greek games. The Greek
@@ -206,5 +212,5 @@ Data files, API keys and `.env` are never committed.
 3. Query layer (opponent, home/away, last N, opponent over .500, player absent) ✅ `analysis.stat_query.query_stats()`
 4. FastAPI + Pydantic `QuerySpec` API ✅ `api/` (`POST /query`, `GET /resolve/{kind}`, `GET /stats`)
 5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 87/87 (13 ranking, 4 shot-list, 6 Greek league questions) and 12/12 held-out with gpt-6-luna on 2026-11-15
-6. Greek league ingestion ✅ regular seasons 2024-25 (132 games), 2025-26 (156) and 2026-27 so far, linked to the Euroleague players and clubs
+6. Greek league ingestion ✅ 2024-25 (132 + 19 playoff games), 2025-26 (156 + 18) and 2026-27 so far, linked to the Euroleague players and clubs
 7. Docker, demo, agent for multi-step questions, Azure deployment

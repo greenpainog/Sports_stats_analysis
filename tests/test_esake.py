@@ -16,6 +16,7 @@ from ingestion.esake import (
     check_game,
     display_name,
     parse_game_page,
+    playoff_series,
     to_latin,
 )
 
@@ -43,6 +44,12 @@ def test_lookalike_capitals_mixed_both_ways():
     assert to_latin("ΤYSON WARD") == ("TYSON WARD", False)  # Latin word, Greek Τ
     assert to_latin("AΛEK ΠITEPΣ") == ("ALEK PITERS", True)  # Greek words, Latin A, E, P
     assert to_latin("KARAMPELAS ZOIS") == ("KARAMPELAS ZOIS", False)
+
+
+def test_playoff_series_leave_out_play_out_and_placement_games():
+    page = "".join(f"$('#series').append(new Option('{label}', '{code}'));" for label, code in [
+        ("QF1", "201"), ("SF2", "302"), ("3P", "304"), ("F1", "401"), ("PO1", "307"), ("CF2", "306")])
+    assert playoff_series(page) == ["201", "302", "304", "401"]
 
 
 def test_display_name():
