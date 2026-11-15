@@ -164,10 +164,27 @@ The competition-aware tables (`competitions`, `seasons`, `teams`, `players`, `ga
 transaction, and re-saving the same game updates rows instead of duplicating them.
 The older `matches` / `team_match_stats` tables remain so the current CLI keeps working.
 
+**One player, two leagues.** `source_links` sends another source's ID to an existing row, so
+Kendrick Nunn is one player with both his Euroleague and Greek league games. The Greek loader
+links a player automatically only on an exact name match; spelling differences (Kostas /
+Konstantinos Mitoglou) are listed for review and linked by hand in `ingestion/esake.py`
+(`MANUAL_PLAYER_LINKS`). Panathinaikos and Olympiacos are linked by hand in `TEAMS`.
+
+**Which league.** Every query, ranking and `/ask` question has `competition`: `"euroleague"`
+(the default) or `"greek_league"`, so Euroleague answers never include Greek games. The Greek
+league has no plus-minus or shot-list stats, and asking for them is an error, not a 0. Rest days
+count games in both leagues (a Sunday Greek game makes Tuesday's Euroleague game short rest).
+
 ## Data sources
 
 - **Euroleague / EuroCup:** the [`euroleague-api`](https://github.com/giasemidis/euroleague_api) package.
-- **Greek league:** planned, via a polite scraper of esake.gr.
+- **Greek league (Stoiximan GBL):** esake.gr game pages, parsed with the standard library's
+  `html.parser` (`python -m ingestion.esake --season 2026-27`). esake.gr has no robots.txt; its
+  terms (read 2026-11-15) allow copies **strictly for personal use** with the source cited, and
+  need ESAKE's written permission for any reproduction or transmission. So the Greek data stays
+  local; a public demo needs permission or Euroleague data only. A round page is downloaded again
+  only while it lists a game that should have finished but has no score; a game counts as
+  finished 3 hours after its start.
 
 Raw responses are saved under `data/raw/`, each page is fetched once, and requests are at
 least one second apart. A response is only cached if it is valid JSON, and it is written to a
@@ -181,6 +198,6 @@ Data files, API keys and `.env` are never committed.
 2. Team/player alias tables and name resolution ✅ `database.aliases.resolve_team()` / `resolve_player()`
 3. Query layer (opponent, home/away, last N, opponent over .500, player absent) ✅ `analysis.stat_query.query_stats()`
 4. FastAPI + Pydantic `QuerySpec` API ✅ `api/` (`POST /query`, `GET /resolve/{kind}`, `GET /stats`)
-5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 80/80 (13 ranking, 4 shot-list questions) and 12/12 held-out with gpt-6-luna on 2026-11-15
-6. Greek league ingestion
+5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 87/87 (13 ranking, 4 shot-list, 6 Greek league questions) and 12/12 held-out with gpt-6-luna on 2026-11-15
+6. Greek league ingestion ✅ 2026-27 so far (48 games), linked to the Euroleague players and clubs
 7. Docker, demo, agent for multi-step questions, Azure deployment

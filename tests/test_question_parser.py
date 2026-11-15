@@ -158,6 +158,7 @@ def test_ask_compare(ask):
     assert [s["label"] for s in body["result"]["comparison"]] == ["without Kick", "with Kick"]
     assert body["spec"]["compare"][0] == {**{k: None for k in LLMCompareSide.model_fields},
                                           "opponent_over_500": False, "label": "without Kick",
+                                          "competition": "euroleague",  # unset by the LLM -> the default
                                           "without_player": "Sid Kick"}
 
 
@@ -238,3 +239,13 @@ def test_ask_ranking_with_unknown_team_needs_clarification(ask):
     assert body["status"] == "needs_clarification" and "Omega" in body["message"]
     body = ask("Kick's ranks", llm_output(ranking=ranking(kind="player_profile", player="Kick"))).json()
     assert body["status"] == "needs_clarification" and len(body["candidates"]) == 2
+
+
+def test_unset_competition_keeps_the_default_and_a_side_inherits_it():
+    result, _ = parse("Bartley points in the Greek league home vs away", llm_output(
+        stats=["points"], player="Bartley", competition="greek_league",
+        compare=[side(label="home", venue="home"), side(label="away", venue="away")]))
+    assert result.spec.competition == "greek_league"
+    assert [spec.competition for _, spec in result.spec.side_specs()] == ["greek_league", "greek_league"]
+    plain, _ = parse("Bartley points", llm_output(stats=["points"], player="Bartley"))
+    assert plain.spec.competition == "euroleague"

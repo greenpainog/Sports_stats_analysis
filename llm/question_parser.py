@@ -53,7 +53,11 @@ def _llm_fields(model, **replace):
 LLMPlayerThreshold = create_model(
     "LLMPlayerThreshold", __config__=ConfigDict(extra="forbid"), **_llm_fields(PlayerThreshold)
 )
-_THRESHOLD = {"player_threshold": Optional[LLMPlayerThreshold]}
+# competition is optional for the LLM: null = not set, so a compare side
+# inherits the question's league instead of the model having to repeat it
+# (and a forced "euroleague" on a side silently overriding a Greek question).
+_THRESHOLD = {"player_threshold": Optional[LLMPlayerThreshold],
+              "competition": Optional[Literal["euroleague", "greek_league"]]}
 LLMCompareSide = create_model(
     "LLMCompareSide", __config__=ConfigDict(extra="forbid"), **_llm_fields(CompareSide, **_THRESHOLD)
 )
@@ -79,6 +83,8 @@ class LLMRanking(BaseModel):
     ))
     other_team: Optional[str] = Field(description="matchup only: the second team.")
     player: Optional[str] = Field(description="player_profile only: the player.")
+    competition: Optional[Literal["euroleague", "greek_league"]] = Field(
+        description="null = euroleague; 'greek_league' for the Greek league (GBL).")
     season: Optional[str]
     phase: Optional[Phase]
     venue: Optional[Venue]
@@ -114,7 +120,7 @@ class RankingRequest:
 
 
 # Which LLMRanking fields each kind may use (besides kind and the shared filters).
-_SHARED = ("stats", "season", "phase", "venue", "result", "max_margin", "last_n", "per", "order")
+_SHARED = ("stats", "season", "phase", "venue", "result", "max_margin", "last_n", "per", "order", "competition")
 _KIND_FIELDS = {
     "team_rankings": ("team", "side"),
     "matchup": ("team", "other_team", "side"),
@@ -167,24 +173,29 @@ class ParseResult:
 
 # --- Prompt ------------------------------------------------------------------
 
-def loaded_seasons():
-    """Season names that have games, oldest first, e.g. ['2024-25', '2025-26']."""
+def loaded_seasons(competition_id="E"):
+    """Season names with games in one competition, oldest first, e.g. ['2024-25', '2025-26']."""
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT s.name FROM seasons s JOIN games g ON g.season_id = s.id ORDER BY s.name"
+            """SELECT DISTINCT s.name FROM seasons s JOIN games g ON g.season_id = s.id
+               JOIN competitions c ON c.id = s.competition_id WHERE c.source_competition_id = ?
+               ORDER BY s.name""", (competition_id,)
         ).fetchall()
     return [name for (name,) in rows]
 
 
-def build_instructions(today=None, seasons=None):
+def build_instructions(today=None, seasons=None, greek_seasons=None):
     today = today or date.today()
     seasons = seasons if seasons is not None else loaded_seasons()
+    greek_seasons = greek_seasons if greek_seasons is not None else loaded_seasons("GBL")
     current = seasons[-1] if seasons else None
     previous = seasons[-2] if len(seasons) > 1 else None
     return f"""You turn a basketball stats question into a query spec. You never answer the question yourself; code runs the query on a database.
 
-Data: EuroLeague games only. Loaded seasons: {", ".join(seasons) or "none"}. Today is {today.isoformat()}, so "{current}" is the current season, still in progress.
+Data: two leagues. EuroLeague seasons: {", ".join(seasons) or "none"}. Greek league (Stoiximan GBL) seasons: {", ".join(greek_seasons) or "none"}. Today is {today.isoformat()}, so "{current}" is the current season, still in progress.
 A spec has exactly one subject: one player OR one team.
+- competition: "greek_league" when the question names the Greek league ("Greek league", "GBL", "Stoiximan GBL", "Basket League", "in Greece", "domestically" for a Greek club); otherwise "euroleague", including when no league is named. E.g. "Bartley points in the Greek league this season" -> player "Bartley", competition "greek_league", season "{current}". The same goes in ranking.competition (null there means euroleague). A compare side may set competition ("in the Euroleague vs the Greek league").
+- The Greek league has no plus_minus and no shot-list stats (paint_points, fastbreak_points, second_chance_points, points_off_turnovers, paint_fg_pct, pts_from_paint_pct): asking for those in the Greek league is not answerable.
 
 How to fill the spec:
 - Copy player and team names as the user wrote them (code resolves nicknames, surnames, accents and typos). Do not expand or correct them.
@@ -219,7 +230,7 @@ Stats for rankings also include advanced ones: possessions, pace, off_rating, de
 Close games ("decided by 5 or less", "+-5") -> max_margin 5; "in wins"/"in losses" -> result "won"/"lost". The season rules above apply to ranking.season too.
 
 Set answerable false, fill reason with one short sentence, and leave the other fields empty/null/false when the question:
-- is about another competition (NBA, EuroCup, Greek league, ACB, national teams, ...);
+- is about another competition (NBA, EuroCup, Greek Cup, ACB, national teams, ...);
 - needs data we do not have (shot locations, salaries, height, dunks, injuries, transfers, coaches, attendance, ...);
 - compares two or more named players, or asks which of a few named players or teams is better ("Hifi or Theis", "who is better") — rankings over the whole league are fine, see ranking;
 - asks for a prediction or opinion, or is not a basketball stats question at all.
@@ -263,6 +274,16 @@ def _error_summary(exc):
     )
 
 
+def _drop_unset_competition(fields):
+    """competition null -> left out, so QuerySpec's default (or the base, for a side) applies."""
+    if fields.get("competition") is None:
+        fields.pop("competition", None)
+    for side in fields.get("compare") or []:
+        if side.get("competition") is None:
+            side.pop("competition", None)
+    return fields
+
+
 def parse_question(question, llm: LLM = None, today=None, seasons=None, max_attempts=2):
     """Ask the LLM for a spec and validate it, retrying once with the errors.
 
@@ -293,7 +314,8 @@ def parse_question(question, llm: LLM = None, today=None, seasons=None, max_atte
             result.reason = raw["reason"] or "This question can't be answered from the loaded data."
             return result
 
-        fields = {k: v for k, v in raw.items() if k not in ("answerable", "reason", "ranking")}
+        fields = _drop_unset_competition(
+            {k: v for k, v in raw.items() if k not in ("answerable", "reason", "ranking")})
         try:
             if raw["ranking"] is not None:
                 result.ranking = to_ranking(raw["ranking"])
