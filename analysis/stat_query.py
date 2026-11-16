@@ -269,7 +269,9 @@ def query_stats(
     conn = get_connection()
     try:
         competition_sql, competition_params = competition_where(competition)
-        _check_stats(conn, stats, competition)
+        # A team's plus-minus is its point margin, taken from the final score
+        # (the source only gives plus-minus for players), so it is never stored.
+        _check_stats(conn, [s for s in stats if not (team is not None and s == "plus_minus")], competition)
         filters, where, params = {}, [competition_sql], list(competition_params)
         if competition != "euroleague":
             filters["competition"] = competition
@@ -395,6 +397,8 @@ def query_stats(
     for game_id, start_time, opp_name, game_venue, team_score, opp_score, rest, opp_rest in reversed(game_rows):
         # Basketball has no draws, so a game is either a win or a loss.
         values.setdefault(game_id, {})["win"] = 1 if team_score > opp_score else 0
+        if subject_type == "team":
+            values[game_id]["plus_minus"] = team_score - opp_score
         result.games.append(GameLine(
             game_id, start_time, opp_name, game_venue, team_score, opp_score, rest, opp_rest,
             _game_values(stats, values[game_id]),

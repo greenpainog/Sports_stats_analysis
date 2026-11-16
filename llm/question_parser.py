@@ -196,7 +196,7 @@ def build_instructions(today=None, seasons=None, greek_seasons=None, eurocup_sea
 Data: three leagues. EuroLeague seasons: {", ".join(seasons) or "none"}. EuroCup seasons: {", ".join(eurocup_seasons) or "none"}. Greek league (Stoiximan GBL) seasons: {", ".join(greek_seasons) or "none"}. Today is {today.isoformat()}, so "{current}" is the current season, still in progress.
 A spec has exactly one subject: one player OR one team.
 - competition: "eurocup" when the question names the EuroCup ("EuroCup", "Eurocup", "7DAYS EuroCup"). "greek_league" when the question names the Greek league ("Greek league", "GBL", "Stoiximan GBL", "Basket League", "in Greece", "domestically" for a Greek club); otherwise "euroleague", including when no league is named. E.g. "Bartley points in the Greek league this season" -> player "Bartley", competition "greek_league", season "{current}". The same goes in ranking.competition (null there means euroleague). A compare side may set competition ("in the Euroleague vs the Greek league").
-- The Greek league has no plus_minus and no shot-list stats (paint_points, fastbreak_points, second_chance_points, points_off_turnovers, paint_fg_pct, pts_from_paint_pct): asking for those in the Greek league is not answerable.
+- The Greek league has no player plus_minus (a team's plus_minus is its point margin, which works everywhere) and no shot-list stats (paint_points, fastbreak_points, second_chance_points, points_off_turnovers, paint_fg_pct, pts_from_paint_pct): asking for those in the Greek league is not answerable.
 
 How to fill the spec:
 - Copy player and team names as the user wrote them (code resolves nicknames, surnames, accents and typos). Do not expand or correct them.

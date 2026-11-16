@@ -125,7 +125,7 @@ shows one player's value and rank in all of them (`{"player": "Nunn", "season": 
   `stl_pct`, `blk_pct`, `ast_to`. Shares of team plays count only the time he was on the floor.
 - Scoring: `pts_from_2pt_pct`, `pts_from_3pt_pct`, `pts_from_ft_pct`, `points_per_fga`, `fg3a_rate`,
   `ft_rate`, `team_pts_share`.
-- Misc: `double_doubles`, `triple_doubles`, `starts`, `games_20_points`, `plus_minus`, `fouls_received`, `pir`.
+- Misc: `double_doubles`, `triple_doubles`, `starts`, `games_20_points`, `plus_minus` (for a team: its point margin, from the score), `fouls_received`, `pir`.
 
 Only players with enough games are ranked: by default half the games of the most active player,
 rounded up (`min_games` overrides it). Use `min_minutes` for shooting stats, or low-volume players

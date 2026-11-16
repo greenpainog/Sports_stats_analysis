@@ -219,6 +219,12 @@ class StatQueryTests(unittest.TestCase):
         both = query_stats(["total_rebounds"], team="Alpha", min_rest_hours=100, max_rest_hours=200)
         self.assertEqual([_day(g) for g in both.games], ["2024-10-15", "2024-10-22"])
 
+    def test_team_plus_minus_is_the_point_margin(self):
+        # Alpha's games: -5, +30, +5, -2, +7 (the source stores no team value).
+        result = query_stats(["plus_minus"], team="Alpha")
+        self.assertEqual([g.values["plus_minus"] for g in result.games], [-5, 30, 5, -2, 7])
+        self.assertEqual(result.summary["plus_minus"].total, 35)
+
     def test_win_pct(self):
         # Alpha: g2 L, g3 W, g4 W, g7 L, g6 W -> 3-2.
         result = query_stats(["win_pct"], team="Alpha")
