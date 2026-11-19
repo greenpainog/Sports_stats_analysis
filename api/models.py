@@ -301,6 +301,8 @@ class RankingSpec(BaseModel):
             raise ValueError("Each stat may be listed only once.")
         if self.side == "opponent" and self.stats and "win_pct" in self.stats:
             raise ValueError("win_pct is the team's own record; use side 'team'.")
+        if self.side == "opponent" and self.stats and {"forced_turnovers", "forced_tov_pct"} & set(self.stats):
+            raise ValueError("forced_turnovers and forced_tov_pct are already the opponents' numbers; use side 'team'.")
         return self
 
 

@@ -63,7 +63,8 @@ BOX_ONLY = [s for s in ADVANCED_TEAM_STATS if s != "pts_from_paint_pct"]  # this
 
 
 def _home(**kw):
-    r = team_rankings(BOX_ONLY, **kw)
+    stats = [s for s in BOX_ONLY if not s.startswith("forced_")] if kw.get("side") == "opponent" else BOX_ONLY
+    r = team_rankings(stats, **kw)
     return next(row for row in r.teams if row.team == "Home Club"), next(row for row in r.teams if row.team == "Away Club")
 
 
@@ -87,6 +88,8 @@ def test_formulas_match_hand_calculation(league):
         "ast_to": 1.82,        # 40 / 22
         "stl_pct": 6.8,        # 100 * 11 / 160.96
         "blk_pct": pytest.approx(8.75, abs=0.051),  # 7 / 80 opponent 2-point attempts
+        "forced_turnovers": 14.5,  # Away Club's 29 turnovers in 2 games
+        "forced_tov_pct": 15.7,    # 29 / (142 + 0.44 * 30 + 29)
     }
     assert (away.values["blk_pct"], away.values["possessions"]) == (8.2, 80.5)  # 7 / 85; same possessions
 
@@ -104,6 +107,20 @@ def test_opponent_side_rates_the_opponents(league):
     own_home, own_away = _home()
     assert home.values["off_rating"] == own_home.values["def_rating"]
     assert home.values["efg_pct"] == own_away.values["efg_pct"]
+
+
+def test_forced_turnovers_are_the_opponents_turnovers(league):
+    # The same numbers as turnovers and tov_pct with side="opponent", but they
+    # can sit next to the team's own stats (steals) in one ranking.
+    home = next(r for r in team_rankings(["forced_turnovers", "forced_tov_pct", "steals"]).teams
+                if r.team == "Home Club")
+    allowed, _ = _home(side="opponent")
+    assert home.values["forced_tov_pct"] == allowed.values["tov_pct"]
+    assert home.values["steals"] == 5.5  # Home Club's own 11 steals, not the opponents' 13
+    total = next(r for r in team_rankings(["forced_turnovers"], per="total").teams if r.team == "Home Club")
+    assert total.values["forced_turnovers"] == 29
+    with pytest.raises(QueryError):
+        team_rankings(["forced_turnovers"], side="opponent")
 
 
 def test_total_possessions(league):

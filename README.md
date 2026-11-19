@@ -108,6 +108,8 @@ Advanced team stats (`analysis/advanced.py`), computed from summed box-score tot
 `def_rating`, `net_rating` (per 100 possessions), `efg_pct`, `ts_pct`, `tov_pct`, `oreb_pct`,
 `dreb_pct`, `ft_rate` (FTA/FGA), `fg3a_rate`, `ast_pct` (assisted share of made shots), `ast_to`,
 `stl_pct` and `blk_pct`. Possessions = FGA − OREB + TOV + 0.44 × FTA, averaged over both teams.
+`forced_turnovers` and `forced_tov_pct` are the opponents' turnovers (per game) and turnover %,
+so "forced turnovers and steals" can be ranked together with side `team`.
 Other sites use slightly different possession formulas, so their numbers can differ a little.
 
 **Shot-list stats** (teams and players, per game): `paint_points`, `paint_fg_made`,

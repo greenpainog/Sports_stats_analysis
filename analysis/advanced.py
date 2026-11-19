@@ -93,6 +93,14 @@ ADVANCED_TEAM_STATS = {
     "blk_pct": Advanced(
         lambda o, p, g: _ratio(o["blocks"], p["fg2_attempted"], 100), 1, ("blocks", "fg2_attempted"),
         "Share of the opponent's 2-point attempts the team blocked."),
+    # What the defence forced: always the opponents' turnovers, whatever the
+    # ranking's side, so "forced turnovers and steals" fits in one question.
+    "forced_turnovers": Advanced(
+        lambda o, p, g: _ratio(p["turnovers"], g), 1, ("turnovers",),
+        "Turnovers the opponents committed, per game (higher is better)."),
+    "forced_tov_pct": Advanced(
+        lambda o, p, g: _ratio(p["turnovers"], _fga(p) + 0.44 * p["ft_attempted"] + p["turnovers"], 100), 1,
+        _SHOOTING + ("turnovers",), "The opponents' turnovers per 100 plays (higher is better)."),
     "pts_from_paint_pct": Advanced(
         lambda o, p, g: _ratio(o["paint_points"], o["points"], 100), 1, ("paint_points", "points"),
         "Share of the team's points scored in the paint."),
