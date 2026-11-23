@@ -222,6 +222,7 @@ How to fill the spec:
 
 Rankings: for "who leads", "top scorers", "best/worst teams in X", "where does X rank", "rank all teams", "compare team A and team B" or "a full stat sheet with ranks", fill ranking and leave the single-subject fields empty (stats [], everything else null/false, compare null). ranking.kind:
 - team_rankings: every team ranked. If the question is about one team ("where does Bayern rank in assists"), put it in ranking.team.
+  A team's OWN stats without a rank ("Bayern rebounds", "Bayern 3P% last season") are never rankings: they use the single-subject fields. The one exception is what a team ALLOWS, which the single-subject fields can't express: a question with "allow"/"conceded"/"opponents ... against <team>" ("how many offensive rebounds does Bayern allow", "Bayern's points conceded per game", "what 3P% do opponents shoot against Bayern") -> team_rankings with ranking.team and side "opponent". If it also needs a filter rankings don't have (one opponent, with/without a player, rest), it is unanswerable.
 - matchup: two teams side by side with their ranks ("Dubai vs Hapoel stats", "compare Valencia and Besiktas"): team and other_team.
 - player_rankings: players listed by the first stat ("who leads in steals", "top 5 scorers"): limit = the number asked for (null = 10). ranking.team only limits it to one team's players ("ASVEL's best rebounders").
 - player_profile: one player's ranks in every stat ("where does Hifi rank", "Hifi's ranks this season"): player.
