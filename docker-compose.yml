@@ -1,0 +1,13 @@
+# Start the API:  docker compose up --build   then open http://localhost:8000/docs
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    # OPENAI_API_KEY for /ask. Read when the container starts, never built into the image.
+    env_file:
+      - .env
+    volumes:
+      # The database the daily update job keeps current. Read-only: the API never writes.
+      - ./data:/app/data:ro
+    restart: unless-stopped

@@ -20,6 +20,26 @@ python init_db.py        # creates any missing tables; never deletes data
 copy .env.example .env   # then put your OpenAI key in .env (only needed for /ask and the eval)
 ```
 
+## Run with Docker
+
+Needs Docker Desktop, a `.env` with your OpenAI key, and a database in `data/` (built by the
+loaders above; it is never committed). Then:
+
+```powershell
+docker compose up --build -d    # build the image and start the API in the background
+curl http://localhost:8000/health
+docker compose logs -f api      # follow the server log
+docker compose down             # stop it
+```
+
+Open http://localhost:8000/docs to try the endpoints. What goes where:
+
+- The image holds only the code (`analysis/`, `api/`, `database/`, `llm/`) and the packages from
+  `requirements.txt`, on Python 3.13. `.dockerignore` keeps `.env`, `data/` and `.venv/` out of it.
+- `data/` is mounted read-only at `/app/data`, so the container reads the same database the daily
+  update job keeps current, and can never change it.
+- `.env` is passed in when the container starts (`env_file`), never built into the image.
+
 ## Usage
 
 ```powershell
@@ -156,6 +176,7 @@ set the `SPORTS_DB_PATH` environment variable to use another file.
 | `tests/` | pytest suite |
 | `ask.py`, `analysis_runner.py` | Older command-line entry points |
 | `legacy/` | The original Flashscore scraper, no longer used |
+| `Dockerfile`, `docker-compose.yml` | The API as a container (see "Run with Docker") |
 | `data/` | Local database and CSV exports (git-ignored); raw API/HTML responses go in `data/raw/` |
 
 ## Database
@@ -236,4 +257,4 @@ Data files, API keys and `.env` are never committed.
 4. FastAPI + Pydantic `QuerySpec` API ✅ `api/` (`POST /query`, `GET /resolve/{kind}`, `GET /stats`)
 5. LLM question → validated `QuerySpec`, with a 50-question evaluation set ✅ `POST /ask`, `eval/`: 93/93 (13 ranking, 4 shot-list, 6 Greek league, 6 EuroCup questions) and 12/12 held-out with gpt-6-luna on 2026-11-16
 6. Greek league ingestion ✅ 2024-25 (132 + 19 playoff games), 2025-26 (156 + 18) and 2026-27 so far, linked to the Euroleague players and clubs
-7. Docker, demo, agent for multi-step questions, Azure deployment
+7. Docker ✅ (`docker compose up`); next: demo, agent for multi-step questions, Azure deployment
