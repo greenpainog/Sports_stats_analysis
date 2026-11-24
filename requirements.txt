@@ -11,6 +11,11 @@ uvicorn==0.54.0
 openai==3.41.0
 python-dotenv==1.2.4
 
+# Multi-step agent (phase 7). langchain-core comes with them; pinned so builds are repeatable.
+langgraph==1.2.24
+langchain-openai==1.8.5
+langchain-core==1.8.4
+
 # Tests
 pytest==9.2.0
 httpx==0.28.1
