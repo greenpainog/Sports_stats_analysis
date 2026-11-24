@@ -1,15 +1,20 @@
 """The multi-step agent as a LangGraph graph.
 
-    question -> agent (LLM) --wants tools--> tools (run_tool) --> agent ...
-                          \\--done--> END
-                          \\--step limit reached--> finish (LLM, no tools) --> END
+    question -> agent (LLM) -> tools (run_tool) -> agent ... while the LLM asks for tools
+    agent done                    -> check
+    agent over the step limit     -> finish (LLM without tools) -> check
+    check: every number is backed by a tool result -> END
+    check fails the first time    -> agent, told which numbers had no source
+    check fails again             -> END with the raw tool results instead
 
-The state is the list of messages (question, LLM turns, tool results) plus a
-count of tool calls. The LLM is passed in, so tests use a scripted fake and
-never call OpenAI. The tools are agent/tools.py: the LLM only picks one and
-fills in its validated arguments; it never writes SQL.
+The state is the list of messages (question, LLM turns, tool results), a count
+of tool calls, how many answers failed the number check, and how it ended.
+The LLM is passed in, so tests use a scripted fake and never call OpenAI. The
+tools are agent/tools.py: the LLM only picks one and fills in its validated
+arguments; it never writes SQL.
 """
 import operator
+from dataclasses import dataclass
 from datetime import date
 from typing import Annotated, TypedDict
 
@@ -19,6 +24,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
 from agent.tools import TOOLS, run_tool
+from agent.verify import unsupported_numbers
 
 MAX_TOOL_CALLS = 6  # past this the agent must answer with what it has
 
@@ -27,6 +33,13 @@ class AgentState(TypedDict):
     # add_messages appends each node's new messages instead of replacing the list.
     messages: Annotated[list[AnyMessage], add_messages]
     tool_calls: Annotated[int, operator.add]  # each node returns how many it made
+    failed_checks: Annotated[int, operator.add]
+    check: str  # "passed", "fixed" (passed after one retry) or "fallback"
+
+
+# Notes the graph itself adds to the conversation. They are left out of the
+# number check's sources: a retry note quotes the very numbers it rejects.
+GRAPH_NOTE = "graph_note"
 
 
 def tool_schemas():
@@ -77,42 +90,84 @@ def build_graph(llm, today=None, seasons=None):
         # The LLM asked for more tools after the limit: drop that request and
         # make it answer from the results it already has (no tools bound).
         note = HumanMessage(f"You have used all {MAX_TOOL_CALLS} tool calls. Answer now from the tool "
-                            "results above, and say what you could not check.")
+                            "results above, and say what you could not check.", name=GRAPH_NOTE)
         reply = llm.invoke([instructions, *state["messages"][:-1], note])
         return {"messages": [reply], "tool_calls": 0}
+
+    def check(state: AgentState):
+        answer = state["messages"][-1].text
+        sources = [m.text for m in state["messages"][:-1]
+                   if isinstance(m, ToolMessage) or (isinstance(m, HumanMessage) and m.name != GRAPH_NOTE)]
+        missing = unsupported_numbers(answer, sources)
+        if not missing:
+            return {"check": "fixed" if state["failed_checks"] else "passed"}
+        if not state["failed_checks"]:
+            note = HumanMessage(
+                f"These numbers in your answer are in no tool result: {', '.join(missing)}. "
+                "Use only numbers the tools returned (call a tool if you need another one) and answer again.",
+                name=GRAPH_NOTE)
+            return {"messages": [note], "failed_checks": 1}
+        return {"messages": [AIMessage(fallback_answer(state["messages"]))], "failed_checks": 1,
+                "check": "fallback"}
 
     def route(state: AgentState):
         last = state["messages"][-1]
         if not getattr(last, "tool_calls", None):
-            return END
+            return "check"
         if state["tool_calls"] + len(last.tool_calls) > MAX_TOOL_CALLS:
             return "finish"
         return "tools"
+
+    def after_check(state: AgentState):
+        return "agent" if isinstance(state["messages"][-1], HumanMessage) else END
 
     graph = StateGraph(AgentState)
     graph.add_node("agent", agent)
     graph.add_node("tools", tools)
     graph.add_node("finish", finish)
+    graph.add_node("check", check)
     graph.add_edge(START, "agent")
-    graph.add_conditional_edges("agent", route, ["tools", "finish", END])
+    graph.add_conditional_edges("agent", route, ["tools", "finish", "check"])
     graph.add_edge("tools", "agent")
-    graph.add_edge("finish", END)
+    graph.add_edge("finish", "check")
+    graph.add_conditional_edges("check", after_check, ["agent", END])
     return graph.compile()
 
 
-def run(graph, question):
-    """Ask one question. Returns (answer text, [(tool name, args, result), ...])."""
-    state = graph.invoke({"messages": [HumanMessage(question)], "tool_calls": 0})
+def tool_steps(messages):
+    """[(tool name, args, result), ...] in the order the tools ran."""
     steps, args_by_id = [], {}
-    for message in state["messages"]:
+    for message in messages:
         if isinstance(message, AIMessage):
             for call in message.tool_calls:
                 args_by_id[call["id"]] = (call["name"], call["args"])
         elif isinstance(message, ToolMessage) and message.tool_call_id in args_by_id:
             name, args = args_by_id[message.tool_call_id]
-            steps.append((name, args, message.content))
+            steps.append((name, args, message.text))
+    return steps
+
+
+def fallback_answer(messages):
+    steps = tool_steps(messages)
+    if not steps:
+        return "I couldn't back my answer with any tool result, so I can't answer this reliably."
+    parts = ["I couldn't confirm every number in my summary, so here are the results it was based on:"]
+    parts += [f"[{name}]\n{result}" for name, _, result in steps]
+    return "\n\n".join(parts)
+
+
+@dataclass
+class AgentResult:
+    answer: str
+    steps: list  # (tool name, args, result)
+    check: str  # "passed", "fixed" or "fallback"
+
+
+def run(graph, question):
+    """Ask one question and return its AgentResult."""
+    state = graph.invoke({"messages": [HumanMessage(question)], "tool_calls": 0, "failed_checks": 0, "check": ""})
     # .text joins the text parts (newer models return content as a list of blocks).
-    return state["messages"][-1].text, steps
+    return AgentResult(state["messages"][-1].text, tool_steps(state["messages"]), state["check"])
 
 
 def openai_llm(model=None, reasoning_effort="low"):

@@ -174,6 +174,17 @@ class QuerySpec(Filters):
                 raise ValueError(f"Compare side '{label}' is invalid: {exc}") from exc
         if len({label for label, _ in sides}) != len(sides):
             raise ValueError("Compare sides need different labels.")
+        # Shared filters apply to every side and a side can't remove them, so
+        # {last_n: 6} on top plus a "season" side makes both sides the last 6.
+        merged = {}
+        for label, spec in sides:
+            key = json.dumps(spec.model_dump(), sort_keys=True, default=str)
+            if key in merged:
+                raise ValueError(
+                    f"Compare sides '{merged[key]}' and '{label}' ask for the same games once the shared "
+                    "filters are added. Top-level filters apply to every side: put the filter that differs "
+                    "(e.g. last_n) only in the side that needs it.")
+            merged[key] = label
         return sides
 
 

@@ -55,8 +55,8 @@ def graph_for(llm):
 
 def test_answers_without_tools():
     llm = FakeLLM([AIMessage("Hello.")])
-    answer, steps = run(graph_for(llm), "hi")
-    assert (answer, steps) == ("Hello.", [])
+    result = run(graph_for(llm), "hi")
+    assert (result.answer, result.steps, result.check) == ("Hello.", [], "passed")
     assert "query_stats" in llm.tool_names and "team_roster" in llm.tool_names
 
 
@@ -65,10 +65,11 @@ def test_tool_result_goes_back_to_the_llm():
         AIMessage("", tool_calls=[call("query_stats", {"player": "Sam Shooter", "stats": ["fg3_pct"]})]),
         AIMessage("Sam Shooter shot 45.0% (9/20) on threes."),
     ])
-    answer, steps = run(graph_for(llm), "Shooter 3P%?")
-    assert answer == "Sam Shooter shot 45.0% (9/20) on threes."
-    assert [name for name, _, _ in steps] == ["query_stats"]
-    assert "9/20 = 45.0%" in steps[0][2]
+    result = run(graph_for(llm), "Shooter 3P%?")
+    assert result.answer == "Sam Shooter shot 45.0% (9/20) on threes."
+    assert result.check == "passed"
+    assert [name for name, _, _ in result.steps] == ["query_stats"]
+    assert "9/20 = 45.0%" in result.steps[0][2]
     # The second LLM call saw the tool's result.
     second = llm.calls[1][1]
     assert isinstance(second[-1], ToolMessage) and "9/20" in second[-1].content
@@ -81,20 +82,21 @@ def test_several_tools_in_one_turn_and_recovering_from_an_error():
         AIMessage("", tool_calls=[call("query_stats", {"player": "Sid Kick", "stats": ["assists"]}, n=2)]),
         AIMessage("Sid Kick: 8 assists in 3 games."),
     ])
-    answer, steps = run(graph_for(llm), "Kick assists")
+    result = run(graph_for(llm), "Kick assists")
+    steps = result.steps
     assert [name for name, _, _ in steps] == ["query_stats", "team_roster", "query_stats"]
     assert steps[0][2].startswith("Error:") and "Candidates" in steps[0][2]
     assert "Sid Kick: 3 games" in steps[1][2]
-    assert answer == "Sid Kick: 8 assists in 3 games."
+    assert result.answer == "Sid Kick: 8 assists in 3 games."
 
 
 def test_step_limit_forces_an_answer_without_tools():
     roster = call("team_roster", {"team": "Alpha", "season": "2024-25"})
     endless = [AIMessage("", tool_calls=[{**roster, "id": f"call_{i}"}]) for i in range(MAX_TOOL_CALLS + 1)]
     llm = FakeLLM([*endless, AIMessage("Alpha's roster is Sam Shooter and Sid Kick.")])
-    answer, steps = run(graph_for(llm), "loop forever")
-    assert len(steps) == MAX_TOOL_CALLS  # the 7th request was never run
-    assert answer == "Alpha's roster is Sam Shooter and Sid Kick."
+    result = run(graph_for(llm), "loop forever")
+    assert len(result.steps) == MAX_TOOL_CALLS  # the 7th request was never run
+    assert result.answer == "Alpha's roster is Sam Shooter and Sid Kick."
     bound, messages = llm.calls[-1]
     assert not bound  # the finishing call has no tools
     assert "used all" in messages[-1].content
@@ -103,3 +105,37 @@ def test_step_limit_forces_an_answer_without_tools():
 def test_prompt_names_the_current_season():
     prompt = agent_graph.system_prompt(seasons=["2025-26", "2026-27"])
     assert "the current one is 2026-27" in prompt and "Every number in your answer must come from a tool result" in prompt
+
+
+SHOOTER_3P = call("query_stats", {"player": "Sam Shooter", "stats": ["fg3_pct"]})
+
+
+def test_an_invented_number_is_sent_back_once_and_fixed():
+    llm = FakeLLM([
+        AIMessage("", tool_calls=[SHOOTER_3P]),
+        AIMessage("Sam Shooter shot 52.3% on threes."),  # not in the tool result
+        AIMessage("Sam Shooter shot 45.0% (9/20) on threes."),
+    ])
+    result = run(graph_for(llm), "Shooter 3P%?")
+    assert (result.answer, result.check) == ("Sam Shooter shot 45.0% (9/20) on threes.", "fixed")
+    retry_note = llm.calls[-1][1][-1]
+    assert "52.3" in retry_note.content and "no tool result" in retry_note.content
+
+
+def test_a_second_invented_number_falls_back_to_the_tool_results():
+    llm = FakeLLM([
+        AIMessage("", tool_calls=[SHOOTER_3P]),
+        AIMessage("Sam Shooter shot 52.3% on threes."),
+        AIMessage("Sam Shooter shot 61.0% on threes."),
+    ])
+    result = run(graph_for(llm), "Shooter 3P%?")
+    assert result.check == "fallback"
+    assert result.answer.startswith("I couldn't confirm every number")
+    assert "9/20 = 45.0%" in result.answer and "61.0" not in result.answer
+
+
+def test_numbers_from_the_question_are_allowed():
+    llm = FakeLLM([AIMessage("", tool_calls=[call("query_stats", {"team": "Alpha", "stats": ["win_pct"], "last_n": 3})]),
+                   AIMessage("In their last 3 games Alpha went 2-1.")])
+    result = run(graph_for(llm), "Alpha record last 3 games")
+    assert result.check == "passed", result.answer

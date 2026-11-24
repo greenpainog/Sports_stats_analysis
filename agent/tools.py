@@ -155,7 +155,9 @@ TOOLS = {tool.name: tool for tool in (
          "One player's or one team's stats over matching games, with filters: opponent, venue, last_n, "
          "opponent_over_500, with/without/against a player, player_threshold, rest, season(s), phase, "
          "competition, and compare: 2-4 sides, each with a label and at least one filter that differs "
-         "(e.g. [{label: 'season', season: '2026-27'}, {label: 'last 6', last_n: 6}]). The main tool."),
+         "(e.g. [{label: 'season', season: '2026-27'}, {label: 'last 6', last_n: 6}]). Top-level "
+         "filters apply to EVERY side, so never put the filter that differs (like last_n) at the top level. "
+         "The main tool."),
     Tool("team_rankings", TeamRankingsArgs, team_rankings,
          "Rank every team on stats (also advanced ones like off_rating, pace, forced_turnovers). "
          "side='opponent' for what teams allowed. Set team to point out one team's rank."),

@@ -222,3 +222,13 @@ def test_compare_side_that_names_the_default_competition_is_a_real_side():
     spec = QuerySpec(stats=["assists"], player="Shooter", compare=[
         {"label": "EL", "competition": "euroleague"}, {"label": "GBL", "competition": "greek_league"}])
     assert [s.competition for _, s in spec.side_specs()] == ["euroleague", "greek_league"]
+
+
+def test_compare_sides_that_end_up_the_same_are_rejected():
+    # last_n on top applies to both sides, so "season" would also be the last 6.
+    with pytest.raises(ValidationError, match="ask for the same games"):
+        QuerySpec(stats=["points"], team="Alpha", last_n=6, compare=[
+            {"label": "last 6", "last_n": 6, "season": "2024-25"}, {"label": "season", "season": "2024-25"}])
+    spec = QuerySpec(stats=["points"], team="Alpha", season="2024-25", compare=[
+        {"label": "last 6", "last_n": 6}, {"label": "season", "season": "2024-25"}])
+    assert [s.last_n for _, s in spec.side_specs()] == [6, None]
