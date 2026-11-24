@@ -1,0 +1,10 @@
+# Never sent to the Docker build: secrets, data, local environments.
+.env
+data/
+.venv/
+.git/
+.claude/
+legacy/
+eval/results/
+__pycache__/
+*.pyc
