@@ -93,6 +93,20 @@ def gold_ranking(gold):
 _RANK_NAMES = {"team": resolve_team, "team_a": resolve_team, "team_b": resolve_team, "player": resolve_player}
 
 
+_FORCED = {"turnovers": "forced_turnovers", "tov_pct": "forced_tov_pct"}
+
+
+def canonical_ranking(request):
+    """Opponent turnovers (or turnover %) with side "opponent" are the same
+    numbers as forced_turnovers (forced_tov_pct) with side "team": score both
+    forms as one."""
+    spec = request.spec
+    if getattr(spec, "side", None) == "opponent" and spec.stats and set(spec.stats) <= set(_FORCED):
+        spec = spec.model_copy(update={"side": "team", "stats": [_FORCED[s] for s in spec.stats]})
+        return type(request)(request.kind, spec, request.focus_team)
+    return request
+
+
 def ranking_key(request):
     """A ranking request with names resolved to ids, for 'spec exact'."""
     data = {"kind": request.kind, **request.spec.model_dump()}
@@ -119,7 +133,8 @@ def run_ranking(request):
 def score_ranking(gold, parsed):
     if parsed.ranking is None:
         return False, False, "expected a ranking, got a single-subject spec"
-    expected_request = gold_ranking(gold)
+    expected_request = canonical_ranking(gold_ranking(gold))
+    parsed.ranking = canonical_ranking(parsed.ranking)
     exact = ranking_key(parsed.ranking) == ranking_key(expected_request)
     try:
         got = run_ranking(parsed.ranking)

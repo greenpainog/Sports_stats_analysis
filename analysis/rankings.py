@@ -32,6 +32,8 @@ from database.db import get_connection
 # Minutes and plus-minus are player stats only; teams always play the whole game.
 TEAM_STATS = tuple(s for s in COUNTING_STATS if s not in ("minutes", "plus_minus"))
 RANKABLE_TEAM_STATS = TEAM_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS + tuple(ADVANCED_TEAM_STATS)
+# Already about the opponent, so they only make sense with side "team".
+FORCED_STATS = ("forced_turnovers", "forced_tov_pct")
 RESULTS = ("won", "lost")
 SIDES = ("team", "opponent")
 PER = ("game", "total")
@@ -130,7 +132,7 @@ def team_rankings(
         raise QueryError("order must be 'highest' or 'lowest'.")
     all_stats = not stats
     stats = list(stats) if stats else [
-        s for s in RANKABLE_TEAM_STATS if not (side == "opponent" and s == "win_pct")]
+        s for s in RANKABLE_TEAM_STATS if not (side == "opponent" and (s == "win_pct" or s in FORCED_STATS))]
     unknown = [s for s in stats if s not in RANKABLE_TEAM_STATS]
     if unknown:
         raise QueryError(f"Can't rank teams on: {', '.join(unknown)}.")
@@ -150,6 +152,8 @@ def team_rankings(
         raise QueryError("side must be 'team' or 'opponent'.")
     if side == "opponent" and "win_pct" in stats:
         raise QueryError("win_pct is the team's own record; use side 'team'.")
+    if side == "opponent" and set(stats) & set(FORCED_STATS):
+        raise QueryError("forced_turnovers and forced_tov_pct are already the opponents' numbers; use side 'team'.")
 
     competition_sql, competition_params = competition_where(competition)
     filters, where, params = {}, [competition_sql], list(competition_params)
@@ -237,6 +241,8 @@ def team_rankings(
                 value = advanced_value(stat, own, opp, len(game_ids))
                 if stat == "possessions" and per == "total" and value is not None:
                     value = round(possessions(own, opp), 1)
+                if stat == "forced_turnovers" and per == "total":
+                    value = opp["turnovers"]
                 row.summary[stat] = StatSummary(stat, len(game_ids), value=value)
             else:
                 row.summary[stat] = _summarise(stat, values, game_ids)
