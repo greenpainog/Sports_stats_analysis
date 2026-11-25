@@ -12,11 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 
 from analysis.player_rankings import RANKABLE_PLAYER_STATS
 from analysis.rankings import RANKABLE_TEAM_STATS
-from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS, RESULT_STATS
+from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS, QUARTER_STATS, RESULT_STATS
 
 # Literal[...] from the tuples gives the JSON schema an exact list of allowed
 # values, so an unknown stat name is rejected before any SQL runs.
-StatName = Literal[COUNTING_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS]
+StatName = Literal[COUNTING_STATS + QUARTER_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS]
 CountingStatName = Literal[COUNTING_STATS]
 Venue = Literal["home", "away", "neutral"]
 Competition = Literal["euroleague", "eurocup", "greek_league"]
@@ -95,6 +95,12 @@ class Filters(BaseModel):
             "or 'when Nunn scores 20+'. Games that player missed never count."
         ),
     )
+    coach: Optional[str] = Field(
+        None, description="Only games where the subject's own team was coached by this person, e.g. "
+                          "'under Ataman'. Euroleague and EuroCup only.")
+    referee: Optional[str] = Field(
+        None, description="Only games this person refereed, e.g. 'when Peruga referees'. Euroleague and "
+                          "EuroCup only.")
 
 
     @field_validator("seasons")
@@ -144,6 +150,8 @@ class QuerySpec(Filters):
             raise ValueError("Give exactly one of 'player' or 'team'.")
         if len(set(self.stats)) != len(self.stats):
             raise ValueError("Each stat may be listed only once.")
+        if self.player is not None and set(self.stats) & set(QUARTER_STATS):
+            raise ValueError("Quarter and half points (points_q1 ... points_second_half) are team stats only.")
         if (self.min_rest_hours is not None and self.max_rest_hours is not None
                 and self.min_rest_hours > self.max_rest_hours):
             raise ValueError("min_rest_hours cannot be more than max_rest_hours.")

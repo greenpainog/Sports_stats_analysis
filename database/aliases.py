@@ -169,3 +169,42 @@ def resolve_team(text, conn=None):
 def resolve_player(text, conn=None):
     """Resolve a player name such as 'Nunn', 'K. Nunn' or 'Jerrian Grant'."""
     return _resolve("player", text, conn)
+
+
+def resolve_staff(role, text, conn=None):
+    """Resolve a coach or referee name ('Ataman', 'Ergin Ataman', 'Atamn').
+
+    Staff have no alias table: their names come from game_staff. A match is
+    the full name, the surname (last word, or last words for 'Garcia
+    Gonzalez'), a close spelling, or a first name alone ('Zeljko'). The candidate id is the name's first
+    game_staff row; the filter itself goes by the normalized name.
+    """
+    own_connection = conn is None
+    conn = conn or get_connection()
+    try:
+        normalized = normalize_name(text)
+        if not normalized:
+            return Resolution(text, "not_found")
+        people = conn.execute(
+            """SELECT MIN(id), MIN(name), normalized FROM game_staff WHERE role = ?
+               GROUP BY normalized ORDER BY MIN(name)""", (role,)).fetchall()
+        found, method = [p for p in people if p[2] == normalized], "exact"
+        if not found:
+            found = [p for p in people if p[2].endswith(" " + normalized)]
+        if not found:
+            scored = [(difflib.SequenceMatcher(None, normalized, p[2]).ratio(), p) for p in people]
+            scored += [(difflib.SequenceMatcher(None, normalized, p[2].split(" ")[-1]).ratio(), p) for p in people]
+            scored = [(score, p) for score, p in scored if score >= FUZZY_CUTOFF]
+            if scored:
+                best = max(score for score, _ in scored)
+                found = sorted({p for score, p in scored if score >= best - 0.02}, key=lambda p: p[1])
+                method = "fuzzy"
+        if not found and " " not in normalized:  # a first name alone: "Zeljko", "Saras"
+            found, method = [p for p in people if p[2].split(" ")[0] == normalized], "first_name"
+        if not found:
+            return Resolution(text, "not_found")
+        return Resolution(text, "match" if len(found) == 1 else "ambiguous", method,
+                          [(staff_id, name) for staff_id, name, _ in found])
+    finally:
+        if own_connection:
+            conn.close()

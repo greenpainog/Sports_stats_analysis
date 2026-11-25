@@ -224,11 +224,28 @@ def quarter_points(header, letter):
     return points
 
 
+# One-off spellings of a coach in the headers -> the name used in his other
+# games. Each was checked: same team, same weeks, one game spelled differently
+# (2026-11-25). Different people who share a surname (Zeljko and Sasa
+# Obradovic, TJ and Tony Parker) are left apart.
+STAFF_NAME_FIXES = {
+    "Sarunas Jasikevicius": "Saras Jasikevicius",
+    "Ty Gary Harrelson": "Ty Harrelson",
+    "Rodrigo Augusto Pastore": "Rodrigo Pastore",
+    "Nenad Zoric Markovic": "Nenad Markovic",
+}
+
+
+def _staff_name(source_name):
+    name = player_display_name(source_name)
+    return STAFF_NAME_FIXES.get(name, name)
+
+
 def header_staff(header):
     """The game's coaches (with their side) and referees, display names."""
-    staff = [{"role": "coach", "team": side, "name": player_display_name(header[key])}
+    staff = [{"role": "coach", "team": side, "name": _staff_name(header[key])}
              for side, key in (("home", "CoachA"), ("away", "CoachB")) if _clean(header.get(key))]
-    staff += [{"role": "referee", "name": player_display_name(header[key])}
+    staff += [{"role": "referee", "name": _staff_name(header[key])}
               for key in ("Referee1", "Referee2", "Referee3") if _clean(header.get(key))]
     return staff
 

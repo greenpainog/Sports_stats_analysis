@@ -17,7 +17,7 @@ means the 5 most recent games against Real.
 """
 from dataclasses import dataclass, field
 
-from database.aliases import resolve_player, resolve_team
+from database.aliases import resolve_player, resolve_staff, resolve_team
 from database.db import get_connection
 
 # Stats stored per game in game_stats. Ingestion must store exactly these
@@ -47,6 +47,27 @@ PERCENTAGE_STATS = {
 # players (the record of the player's team in the games he played).
 RESULT_STATS = ("win_pct",)
 
+# A team's points per quarter and half (Euroleague and EuroCup), from the
+# header's quarter scores. Stored as "points" rows with period q1-q4 (and ot);
+# read back as points_q1 ... and added up into the halves. Teams only: player
+# quarters need play-by-play.
+QUARTER_STATS = ("points_q1", "points_q2", "points_q3", "points_q4", "points_first_half", "points_second_half")
+HALVES = {"points_first_half": ("points_q1", "points_q2"), "points_second_half": ("points_q3", "points_q4")}
+
+
+def period_stat_name(stat_name, period):
+    """('points', 'match') -> 'points'; ('points', 'q1') -> 'points_q1'."""
+    return stat_name if period == "match" else f"{stat_name}_{period}"
+
+
+def add_halves(values):
+    """Add points_first_half/second_half to one game's {stat: value} when both quarters are there."""
+    for half, quarters in HALVES.items():
+        if all(q in values for q in quarters):
+            values[half] = sum(values[q] or 0 for q in quarters)
+    return values
+
+
 VENUES = ("home", "away", "neutral")
 
 # Competition name in a spec -> competitions.source_competition_id.
@@ -73,12 +94,13 @@ def stored_stats(conn, competition, entity_type=None):
     games = conn.execute("SELECT COUNT(*), MAX(id) FROM games").fetchone()
     key = (db.DATABASE_FILE, competition, entity_type, *games)
     if key not in _stored_cache:
-        sql = f"""SELECT DISTINCT stat_name FROM game_stats WHERE game_id IN (
+        sql = f"""SELECT DISTINCT stat_name, period FROM game_stats WHERE game_id IN (
                      SELECT g.id FROM games g JOIN seasons s ON s.id = g.season_id
                      JOIN competitions c ON c.id = s.competition_id WHERE c.source_competition_id = ?)
                   {"AND entity_type = ?" if entity_type else ""}"""
         params = [COMPETITIONS[competition]] + ([entity_type] if entity_type else [])
-        _stored_cache[key] = {row[0] for row in conn.execute(sql, params)}
+        names = {period_stat_name(stat, period) for stat, period in conn.execute(sql, params)}
+        _stored_cache[key] = names | {half for half, quarters in HALVES.items() if set(quarters) <= names}
     return _stored_cache[key]
 
 
@@ -152,7 +174,8 @@ def _resolve(resolver, text, label):
         return result.id, result.name
     if result.status == "ambiguous":
         names = ", ".join(name for _, name in result.candidates)
-        raise QueryError(f"'{text}' could mean several {label}s: {names}.", result.candidates)
+        plural = f"{label}es" if label.endswith("ch") else f"{label}s"  # coaches, players
+        raise QueryError(f"'{text}' could mean several {plural}: {names}.", result.candidates)
     raise QueryError(f"No {label} named '{text}' in the database.")
 
 
@@ -211,6 +234,8 @@ def query_stats(
     max_rest_hours=None,
     min_rest_hours=None,
     player_threshold=None,
+    coach=None,
+    referee=None,
 ):
     """Return a QueryResult for one player or one team.
 
@@ -230,6 +255,8 @@ def query_stats(
     season: season name such as "2024-25". seasons: several season names,
         e.g. ["2025-26", "2026-27"]; not with `season`.
     phase: e.g. "regular_season".
+    coach: only games where the subject's own team (a player's team that game)
+        was coached by this person. referee: only games this person refereed.
     competition: "euroleague" (default), "eurocup" or "greek_league". A player
         in several leagues is one player; this decides which games count.
     max_rest_hours / min_rest_hours: hours since the subject's team played
@@ -272,6 +299,9 @@ def query_stats(
         # A team's plus-minus is its point margin, taken from the final score
         # (the source only gives plus-minus for players), so it is never stored.
         _check_stats(conn, [s for s in stats if not (team is not None and s == "plus_minus")], competition)
+        if player is not None and set(stats) & set(QUARTER_STATS):
+            raise QueryError("Quarter and half points are team stats only for now (a player's quarters need "
+                             "play-by-play data, which isn't loaded).")
         filters, where, params = {}, [competition_sql], list(competition_params)
         if competition != "euroleague":
             filters["competition"] = competition
@@ -345,6 +375,16 @@ def query_stats(
             filters["phase"] = phase
             where.append("tg.phase = ?")
             params.append(phase)
+        # Coach: the subject's own team (a player's team in that game) was coached
+        # by them. Referee: they refereed the game. Both from the game headers.
+        for role, name, team_condition in (("coach", coach, "AND st.team_id = tg.team_id"),
+                                           ("referee", referee, "")):
+            if name is None:
+                continue
+            staff_id, filters[role] = _resolve(lambda t: resolve_staff(role, t, conn), name, role)
+            where.append(f"""EXISTS (SELECT 1 FROM game_staff st WHERE st.game_id = tg.game_id AND st.role = ?
+                             {team_condition} AND st.normalized = (SELECT normalized FROM game_staff WHERE id = ?))""")
+            params += [role, staff_id]
         if max_rest_hours is not None:
             filters["max_rest_hours"] = max_rest_hours
             where.append("tg.rest_hours <= ?")
@@ -423,15 +463,14 @@ def _load_values(conn, subject_type, subject_id, game_ids):
     column = "player_id" if subject_type == "player" else "team_id"
     placeholders = ", ".join("?" for _ in game_ids)
     rows = conn.execute(
-        f"""SELECT game_id, stat_name, stat_value FROM game_stats
-            WHERE entity_type = ? AND {column} = ? AND period = 'match'
-              AND game_id IN ({placeholders})""",
+        f"""SELECT game_id, stat_name, period, stat_value FROM game_stats
+            WHERE entity_type = ? AND {column} = ? AND game_id IN ({placeholders})""",
         [subject_type, subject_id, *game_ids],
     ).fetchall()
     values = {}
-    for game_id, stat_name, value in rows:
-        values.setdefault(game_id, {})[stat_name] = value
-    return values
+    for game_id, stat_name, period, value in rows:
+        values.setdefault(game_id, {})[period_stat_name(stat_name, period)] = value
+    return {game_id: add_halves(game) for game_id, game in values.items()}
 
 
 def _game_values(stats, game_values):
@@ -450,6 +489,8 @@ def _game_values(stats, game_values):
 
 
 def _summarise(stat, values, game_ids):
+    if stat in QUARTER_STATS:  # only games whose quarter scores were recorded, not zeros for the rest
+        game_ids = [g for g in game_ids if stat in values.get(g, {})]
     games = len(game_ids)
     if stat == "win_pct":
         wins = sum(values[g]["win"] for g in game_ids)

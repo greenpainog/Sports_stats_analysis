@@ -16,12 +16,15 @@ from analysis.advanced import ADVANCED_TEAM_STATS, advanced_value, possessions
 from analysis.stat_query import (
     COUNTING_STATS,
     PERCENTAGE_STATS,
+    QUARTER_STATS,
     RESULT_STATS,
     TEAM_GAMES_CTE,
     QueryError,
     StatSummary,
     _check_stats,
     _resolve,
+    add_halves,
+    period_stat_name,
     _summarise,
     competition_where,
     stored_stats,
@@ -31,7 +34,8 @@ from database.db import get_connection
 
 # Minutes and plus-minus are player stats only; teams always play the whole game.
 TEAM_STATS = tuple(s for s in COUNTING_STATS if s not in ("minutes", "plus_minus"))
-RANKABLE_TEAM_STATS = TEAM_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS + tuple(ADVANCED_TEAM_STATS)
+RANKABLE_TEAM_STATS = (TEAM_STATS + QUARTER_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS
+                       + tuple(ADVANCED_TEAM_STATS))
 # Already about the opponent, so they only make sense with side "team".
 FORCED_STATS = ("forced_turnovers", "forced_tov_pct")
 RESULTS = ("won", "lost")
@@ -209,17 +213,18 @@ def team_rankings(
         # Both sides' team rows for the matching games (at most ~850 ids, under SQLite's limit).
         game_ids = sorted({row[0] for row in games})
         stat_rows = conn.execute(
-            f"""SELECT game_id, team_id, stat_name, stat_value FROM game_stats
-                WHERE entity_type = 'team' AND period = 'match'
-                  AND game_id IN ({', '.join('?' for _ in game_ids)})""",
+            f"""SELECT game_id, team_id, stat_name, period, stat_value FROM game_stats
+                WHERE entity_type = 'team' AND game_id IN ({', '.join('?' for _ in game_ids)})""",
             game_ids,
         ).fetchall() if game_ids else []
     finally:
         conn.close()
 
     by_side = {}
-    for game_id, team_id, stat_name, value in stat_rows:
-        by_side.setdefault((game_id, team_id), {})[stat_name] = value
+    for game_id, team_id, stat_name, period, value in stat_rows:
+        by_side.setdefault((game_id, team_id), {})[period_stat_name(stat_name, period)] = value
+    for values in by_side.values():
+        add_halves(values)
 
     per_team, other_side, names = {}, {}, {}
     for game_id, team_id, opponent_id, team_score, opponent_score, name in games:
