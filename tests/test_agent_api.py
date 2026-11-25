@@ -67,3 +67,23 @@ def test_null_arguments_are_left_out_of_the_steps(client):
     use_llm(FakeLLM([AIMessage("", tool_calls=[call("query_stats", args)]), AIMessage("Done.")]))
     [step] = client.post("/agent", json={"question": "Sam Shooter home vs away"}).json()["steps"]
     assert "venue" not in step["args"] and step["args"]["compare"][0] == {"label": "home", "venue": "home"}
+
+
+def test_a_conversation_id_carries_a_follow_up(client):
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    llm = FakeLLM([AIMessage("First answer."), AIMessage("Second answer.")])
+    graph = build_graph(llm, seasons=["2024-25"], checkpointer=InMemorySaver())
+    app.dependency_overrides[get_agent] = lambda: graph
+    first = client.post("/agent", json={"question": "Sam Shooter 3P%?"}).json()
+    assert first["conversation_id"]
+    second = client.post("/agent", json={"question": "and Sid Kick?",
+                                          "conversation_id": first["conversation_id"]}).json()
+    assert second["conversation_id"] == first["conversation_id"] and second["answer"] == "Second answer."
+    assert any(m.text == "First answer." for m in llm.calls[1][1])
+
+
+def test_conversation_id_is_validated(client):
+    use_llm(FakeLLM([]))
+    response = client.post("/agent", json={"question": "Sam Shooter 3P%?", "conversation_id": "../etc"})
+    assert response.status_code == 422

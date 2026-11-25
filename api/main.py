@@ -7,9 +7,11 @@ then open http://127.0.0.1:8000/docs for interactive documentation.
 from datetime import date
 from functools import lru_cache
 from typing import Literal
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse
+from langgraph.checkpoint.memory import InMemorySaver
 from openai import OpenAIError
 
 from analysis.stat_query import (
@@ -186,9 +188,15 @@ def _without_nulls(value):
     return value
 
 
+# Every /agent conversation, by conversation_id. Shared by each day's graph so
+# a conversation survives the daily rebuild. In memory: one server process
+# only, and lost on restart.
+CONVERSATIONS = InMemorySaver()
+
+
 @lru_cache(maxsize=1)
 def _agent_for(today):
-    return build_graph(openai_llm(), today=today)
+    return build_graph(openai_llm(), today=today, checkpointer=CONVERSATIONS)
 
 
 def get_agent():
@@ -209,14 +217,16 @@ def agent(request: AgentRequest, graph=Depends(get_agent)):
     answer: at most 6 calls. Every number in the answer is checked against the
     tool results before it is returned; `steps` shows each call and result.
     Slower than /ask (several LLM calls), so use /ask for one-lookup questions.
+    Send the returned conversation_id with the next question for a follow-up.
     """
+    conversation_id = request.conversation_id or uuid4().hex
     try:
-        result = run_agent(graph, request.question)
+        result = run_agent(graph, request.question, conversation_id)
     except OpenAIError as exc:  # network, rate limit, bad key: the LLM's fault, not the question's
-        body = AgentResponse(question=request.question, status="error",
+        body = AgentResponse(question=request.question, conversation_id=conversation_id, status="error",
                              answer=f"The agent's LLM is unavailable right now ({type(exc).__name__}). Try /ask.")
         return JSONResponse(status_code=503, content=body.model_dump())
     return AgentResponse(
-        question=request.question, status="answered", answer=result.answer, check=result.check,
+        question=request.question, conversation_id=conversation_id, status="answered", answer=result.answer, check=result.check,
         steps=[AgentStep(tool=name, args=_without_nulls(args), result=text) for name, args, text in result.steps],
     )

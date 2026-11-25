@@ -5,11 +5,12 @@ test checks a path through the graph: answer directly, call tools and
 continue, recover from a tool error, and stop at the step limit.
 """
 import pytest
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.checkpoint.memory import InMemorySaver
 
 import database.db as db
 from agent import graph as agent_graph
-from agent.graph import MAX_TOOL_CALLS, build_graph, run
+from agent.graph import MAX_TOOL_CALLS, MAX_TURNS, build_graph, recent, run
 from tests.test_stat_query import build_test_league
 
 
@@ -139,3 +140,59 @@ def test_numbers_from_the_question_are_allowed():
                    AIMessage("In their last 3 games Alpha went 2-1.")])
     result = run(graph_for(llm), "Alpha record last 3 games")
     assert result.check == "passed", result.answer
+
+
+# --- Conversations (follow-up questions) ---------------------------------------
+
+def remembering(llm):
+    return build_graph(llm, seasons=["2024-25"], checkpointer=InMemorySaver())
+
+
+def test_a_follow_up_sees_the_earlier_question_and_results():
+    llm = FakeLLM([
+        AIMessage("", tool_calls=[call("query_stats", {"player": "Sam Shooter", "stats": ["fg3_pct"]})]),
+        AIMessage("Sam Shooter: 45.0%."),
+        AIMessage("", tool_calls=[call("query_stats", {"player": "Sid Kick", "stats": ["fg3_pct"]}, n=2)]),
+        AIMessage("Sid Kick shoots less well than Sam Shooter's 45.0%."),
+    ])
+    graph = remembering(llm)
+    first = run(graph, "Sam Shooter 3P%?", "c1")
+    second = run(graph, "and Sid Kick?", "c1")
+    sent = llm.calls[2][1]  # what the LLM saw for the follow-up
+    assert any(isinstance(m, HumanMessage) and m.text == "Sam Shooter 3P%?" for m in sent)
+    assert any(isinstance(m, ToolMessage) and "9/20 = 45.0%" in m.text for m in sent)
+    # Each result is about its own question: one step each, and 45.0 from the
+    # first question's tool result passes the follow-up's number check.
+    assert [s[1]["player"] for s in first.steps] == ["Sam Shooter"]
+    assert [s[1]["player"] for s in second.steps] == ["Sid Kick"]
+    assert second.check == "passed"
+
+
+def test_conversations_are_kept_apart():
+    llm = FakeLLM([AIMessage("One."), AIMessage("Two.")])
+    graph = remembering(llm)
+    run(graph, "first question", "a")
+    run(graph, "second question", "b")
+    assert [m.text for m in llm.calls[1][1][1:]] == ["second question"]  # after the system prompt
+
+
+def test_the_step_limit_counts_each_question_separately():
+    calls = [call("resolve_name", {"kind": "team", "name": "Alpha"}, n=i) for i in range(MAX_TOOL_CALLS)]
+    llm = FakeLLM([AIMessage("", tool_calls=calls), AIMessage("Done."),
+                   AIMessage("", tool_calls=[call("resolve_name", {"kind": "team", "name": "Beta"}, n=9)]),
+                   AIMessage("Done again.")])
+    graph = remembering(llm)
+    run(graph, "use every tool call", "c")
+    second = run(graph, "one more lookup", "c")
+    assert second.answer == "Done again." and len(second.steps) == 1  # not sent to finish
+
+
+def test_old_questions_are_dropped_at_a_question_boundary():
+    messages = []
+    for i in range(MAX_TURNS + 2):
+        messages += [HumanMessage(f"q{i}"),
+                     AIMessage("", tool_calls=[call("resolve_name", {"kind": "team", "name": "Alpha"}, n=i)]),
+                     ToolMessage("'Alpha' is Alpha.", tool_call_id=f"call_resolve_name_{i}"),
+                     AIMessage(f"a{i}")]
+    kept = recent(messages)
+    assert kept[0].text == "q2" and len(kept) == 4 * MAX_TURNS

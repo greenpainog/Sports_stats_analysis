@@ -276,6 +276,9 @@ class AskResponse(BaseModel):
 class AgentRequest(BaseModel):
     question: str = Field(min_length=3, max_length=500, examples=[
         "Is Panathinaikos rebounding better in its last 6 games than over the season?"])
+    conversation_id: Optional[str] = Field(None, pattern=r"^[A-Za-z0-9_-]{1,64}$", description=(
+        "Leave out to start a conversation; send back the id from the response to ask a follow-up "
+        "(\"and Zalgiris?\"). Conversations are kept in memory and lost when the server restarts."))
 
 
 class AgentStep(BaseModel):
@@ -290,6 +293,7 @@ class AgentResponse(BaseModel):
     """The agent's answer and every tool call behind it."""
 
     question: str
+    conversation_id: str = Field(description="Send this with the next question to continue the conversation.")
     status: Literal["answered", "error"] = Field(
         description="answered: answer is set. error: the LLM call failed.")
     answer: str
