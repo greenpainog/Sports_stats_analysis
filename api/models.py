@@ -273,6 +273,32 @@ class AskResponse(BaseModel):
     candidates: list[Candidate] = []
 
 
+class AgentRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=500, examples=[
+        "Is Panathinaikos rebounding better in its last 6 games than over the season?"])
+
+
+class AgentStep(BaseModel):
+    """One tool call the agent made, in order."""
+
+    tool: str
+    args: dict = Field(description="The arguments the LLM filled in (validated before the tool ran).")
+    result: str = Field(description="What the tool returned, which is what the LLM read.")
+
+
+class AgentResponse(BaseModel):
+    """The agent's answer and every tool call behind it."""
+
+    question: str
+    status: Literal["answered", "error"] = Field(
+        description="answered: answer is set. error: the LLM call failed.")
+    answer: str
+    check: Optional[Literal["passed", "fixed", "fallback"]] = Field(None, description=(
+        "The number check: passed (every number came from a tool result), fixed (it passed after one "
+        "retry) or fallback (it failed twice, so the answer is the raw tool results)."))
+    steps: list[AgentStep] = []
+
+
 QueryResponse.model_rebuild()  # resolve the forward reference to ComparisonSide
 
 

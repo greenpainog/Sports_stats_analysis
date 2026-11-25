@@ -29,7 +29,7 @@ class FakeLLM:
 
     def bind_tools(self, tools):
         self.shared["tool_names"] = [t["function"]["name"] for t in tools]
-        return FakeLLM(None, bound=True, shared=self.shared)
+        return type(self)(None, bound=True, shared=self.shared)  # subclasses keep their behaviour
 
     def invoke(self, messages):
         self.calls.append((self.bound, messages))

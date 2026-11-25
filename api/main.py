@@ -4,12 +4,13 @@ Run locally from the project root:
     uvicorn api.main:app --reload
 then open http://127.0.0.1:8000/docs for interactive documentation.
 """
-from typing import Literal
-
+from datetime import date
 from functools import lru_cache
+from typing import Literal
 
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse
+from openai import OpenAIError
 
 from analysis.stat_query import (
     COUNTING_STATS,
@@ -19,6 +20,9 @@ from analysis.stat_query import (
 )
 from api.service import answer_ranking, answer_spec, matchup_spec, player_profile_spec, player_rankings_spec, rankings_spec
 from api.models import (
+    AgentRequest,
+    AgentResponse,
+    AgentStep,
     AskRequest,
     AskResponse,
     ErrorResponse,
@@ -34,6 +38,7 @@ from api.models import (
     RankingsResponse,
     ResolveResponse,
 )
+from agent.graph import build_graph, openai_llm, run as run_agent
 from database.aliases import resolve_player, resolve_team
 from llm.question_parser import OpenAILLM, parse_question
 
@@ -170,3 +175,48 @@ def ask(request: AskRequest, llm=Depends(get_llm)):
         )
     return AskResponse(question=question, status="answered", message=result.answer,
                        spec=parsed.spec, result=result)
+
+
+def _without_nulls(value):
+    """The LLM fills every optional field with null; leave those out of the steps shown."""
+    if isinstance(value, dict):
+        return {k: _without_nulls(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_without_nulls(v) for v in value]
+    return value
+
+
+@lru_cache(maxsize=1)
+def _agent_for(today):
+    return build_graph(openai_llm(), today=today)
+
+
+def get_agent():
+    """The agent graph used by /agent. Tests replace it via app.dependency_overrides.
+
+    It is built once per day: the system prompt says what today is, and
+    building the graph each request would redo that work for nothing.
+    """
+    return _agent_for(date.today())
+
+
+@app.post("/agent", response_model=AgentResponse, responses={503: {"model": AgentResponse}})
+def agent(request: AgentRequest, graph=Depends(get_agent)):
+    """Answer a question that may need several lookups (multi-step agent).
+
+    The LLM plans tool calls (the same validated queries as the other
+    endpoints, never SQL), reads each result and calls more until it can
+    answer: at most 6 calls. Every number in the answer is checked against the
+    tool results before it is returned; `steps` shows each call and result.
+    Slower than /ask (several LLM calls), so use /ask for one-lookup questions.
+    """
+    try:
+        result = run_agent(graph, request.question)
+    except OpenAIError as exc:  # network, rate limit, bad key: the LLM's fault, not the question's
+        body = AgentResponse(question=request.question, status="error",
+                             answer=f"The agent's LLM is unavailable right now ({type(exc).__name__}). Try /ask.")
+        return JSONResponse(status_code=503, content=body.model_dump())
+    return AgentResponse(
+        question=request.question, status="answered", answer=result.answer, check=result.check,
+        steps=[AgentStep(tool=name, args=_without_nulls(args), result=text) for name, args, text in result.steps],
+    )
