@@ -115,7 +115,7 @@ counts either team, so teammates too). `seasons` takes several seasons at once, 
 ```
 `/ask` builds these from questions like "Panathinaikos turnovers when Nunn is out vs playing".
 
-**Team rankings.** `POST /rankings` ranks every team on each stat (all 23 team stats when `stats`
+**Team rankings.** `POST /rankings` ranks every team on each stat (every team stat when `stats`
 is left out). `POST /matchup` puts two teams side by side with their league rank for every stat:
 
 ```json
@@ -142,6 +142,24 @@ Euroleague "Points" endpoint). The paint is worked out from the shot coordinates
 4.9 m × 5.8 m), not from the source's zone letters, which don't line up with it. A game's shot list
 must have the box score's made shots and free throws. 3 of 842 games don't, and they have no
 shot-list stats. 10 more are missing one missed attempt, which only affects `paint_fg_attempted`.
+
+**Quarter points, coaches and referees** (Euroleague and EuroCup, from each game's header):
+- **Quarter and half points:** `points_q1` … `points_q4`, `points_first_half` and
+  `points_second_half`, for teams in `/query` and team rankings (`side: "opponent"` for points
+  allowed).
+  - The header's quarter scores are running totals, so each quarter's own points are stored as
+    `points` rows with period `q1`–`q4`; overtime is period `ot`, which the halves leave out.
+  - Averages count only games with recorded quarter scores.
+  - A player's quarters need play-by-play, so they are refused for now.
+- **`coach`** keeps games where the subject's own team (a player's team in that game) was coached
+  by that person.
+- **`referee`** keeps games that person refereed.
+- **Name lookup:** both take a full name, a surname, a close spelling or a first name alone
+  ("Zeljko"). A shared surname ("Obradovic") returns candidates.
+  - Four one-off spellings of a coach are merged in `STAFF_NAME_FIXES` (`ingestion/euroleague.py`).
+- **The agent's `team_roster` tool** names each season's head coach.
+- **Reloading from the cache:** `python -m ingestion.euroleague --season 2026 --cached-only`
+  reloads a season from `data/raw/` without any request (e.g. after a loader change).
 
 **Player rankings.** `POST /player-rankings` ranks players on 47 stats; `POST /player-profile`
 shows one player's value and rank in all of them (`{"player": "Nunn", "season": "2026-27"}`).
@@ -186,7 +204,10 @@ set the `SPORTS_DB_PATH` environment variable to use another file.
 ## Database
 
 The competition-aware tables (`competitions`, `seasons`, `teams`, `players`, `games`,
-`game_appearances`, `game_stats`) are the source of truth going forward.
+`game_appearances`, `game_stats`, `game_staff`) are the source of truth going forward.
+`game_stats.period` is `match` for whole-game stats; quarter scores use `q1`–`q4` and `ot`, so
+every query that wants game totals filters on `period = 'match'`. `game_staff` holds each game's
+coaches (with their team) and referees.
 `database.repositories.save_game_bundle()` saves one game with all of its stats in a single
 transaction, and re-saving the same game updates rows instead of duplicating them.
 The older `matches` / `team_match_stats` tables remain so the current CLI keeps working.

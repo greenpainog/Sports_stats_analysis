@@ -279,6 +279,7 @@ python -m pytest
   - with, without or against a player
   - a player's own minutes or points in that game ("when Lessort plays 30+ minutes")
   - days of rest
+  - the team's coach ("Fenerbahce under Jasikevicius") or the game's referee
   - season, several seasons, regular season or playoffs
 - **Comparisons:** 2-4 sides in one question ("with X vs without X", "this season vs last").
 - **Rankings:** every team or player ranked on a stat; where one team or player ranks; two teams
@@ -289,6 +290,8 @@ python -m pytest
   - player: usage % and more
 - **Shot-list stats:** paint points (worked out from shot coordinates), fast-break,
   second-chance and points off turnovers.
+- **Quarter and half points** for teams, scored or allowed ("4th quarter points",
+  "fewest first-half points allowed").
 
 Every endpoint, filter and stat is in [docs/REFERENCE.md](docs/REFERENCE.md).
 

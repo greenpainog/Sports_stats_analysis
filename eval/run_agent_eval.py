@@ -17,6 +17,8 @@ value of the result to look for, so newly loaded games never make it stale.
         whoever is at that position (the answer must name it)
     {"players": PlayerRankingSpec, "pick": 1, "field": "player" | "value", "stat": ...}
         the same for player_rankings
+    {"coach_of": {"team": "Olympiacos", "season": "2026-27"}}
+        the coach with the most games for that team and season (the answer must name him)
     {"declines": true}
         the agent must say it can't answer or doesn't predict
 
@@ -66,6 +68,19 @@ def gold_value(fact):
     """('number', value) or ('team' | 'player', name) or ('declines', None)."""
     if fact.get("declines"):
         return "declines", None
+    if "coach_of" in fact:
+        found = resolve_team(fact["coach_of"]["team"])
+        conn = get_connection()
+        try:
+            row = conn.execute(
+                """SELECT st.name FROM game_staff st JOIN games g ON g.id = st.game_id
+                   JOIN seasons s ON s.id = g.season_id
+                   WHERE st.role = 'coach' AND st.team_id = ? AND s.name = ?
+                   GROUP BY st.normalized ORDER BY COUNT(*) DESC LIMIT 1""",
+                (found.candidates[0][0], fact["coach_of"]["season"])).fetchone()
+        finally:
+            conn.close()
+        return "player", row[0]  # matched like a player: by surname
     if "query" in fact:
         result = answer_spec(QuerySpec(**fact["query"]))
         if "side" in fact:
