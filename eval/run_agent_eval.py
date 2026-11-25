@@ -18,7 +18,7 @@ value of the result to look for, so newly loaded games never make it stale.
     {"players": PlayerRankingSpec, "pick": 1, "field": "player" | "value", "stat": ...}
         the same for player_rankings
     {"declines": true}
-        the agent must say it can't answer (no prediction, no data)
+        the agent must say it can't answer or doesn't predict
 
 A number counts when the answer has it to within 0.05 (answers round to one
 decimal). A name counts when any of its aliases is in the answer ("Red Star"
@@ -44,7 +44,7 @@ QUESTIONS_FILE = EVAL_DIR / "agent_questions.jsonl"
 RESULTS_DIR = EVAL_DIR / "results"
 DECLINE_WORDS = ("can't", "cannot", "can not", "unable", "not able", "don't have", "do not have",
                  "doesn't have", "does not have", "no data", "not possible", "isn't possible", "not available",
-                 "not supported", "isn't supported", "doesn't know", "does not know", "doesn't track", "does not track")
+                 "not supported", "isn't supported", "don't predict", "do not predict", "doesn't predict", "won't predict", "doesn't know", "does not know", "doesn't track", "does not track")
 
 
 def load_questions(path=QUESTIONS_FILE):
