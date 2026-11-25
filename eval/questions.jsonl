@@ -100,3 +100,5 @@
 {"id": "u100", "category": "unanswerable", "question": "What's Campazzo's plus minus when he's on the floor with Tavares this season?", "gold": null}
 {"id": "u101", "category": "unanswerable", "question": "Olympiacos net rating with Vezenkov and Fournier on the court together", "gold": null}
 {"id": "w102", "category": "with_without", "question": "Campazzo assists in games when Tavares plays this season", "gold": {"stats": ["assists"], "player": "Facundo Campazzo", "with_player": "Walter Tavares", "season": "2026-27"}}
+{"id": "r103", "category": "ranking", "question": "Which player has blocked the most shots in the Euroleague this season?", "gold": {"ranking": {"kind": "player_rankings", "stats": ["blocks"], "per": "total", "season": "2026-27"}}}
+{"id": "r104", "category": "ranking", "question": "Who dished out the most assists per game in the Euroleague this season?", "gold": {"ranking": {"kind": "player_rankings", "stats": ["assists"], "season": "2026-27"}}}
