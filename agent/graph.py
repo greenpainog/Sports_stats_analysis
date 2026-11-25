@@ -90,6 +90,7 @@ Rules:
 - If a tool returns "Error: ...", fix the arguments and try again, or use resolve_name for a name it didn't find.
 - Earlier questions in this conversation are context for follow-ups ("and Zalgiris?", "what about away games?"): keep their stats and filters unless the new question changes them. Numbers from earlier tool results may be reused.
 - If a name is ambiguous, or the data can't answer the question, say so plainly instead of guessing.
+- with_player/without_player mean whole games a player played or missed. The data does NOT know who was on the floor at the same time (lineups, "+/- when both are on the court"). For such a question say that plainly first; you may then give the games-played version, clearly labelled as games both played, never as time on the floor together.
 - The data covers games already played. Never predict (who will win, future stats) or name a favourite: say you can't predict, and you may add the current facts (record, standings) as facts only.
 - Answer in a few short sentences: the conclusion first, then the numbers behind it, with the number of games each is based on."""
 

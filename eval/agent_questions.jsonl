@@ -13,3 +13,4 @@
 {"id": "a13", "category": "follow_up", "turns": [{"question": "How many points per game is Kendrick Nunn averaging this season?", "facts": [{"query": {"season": "2026-27", "player": "Kendrick Nunn", "stats": ["points"]}, "stat": "points", "field": "per_game"}]}, {"question": "And in away games?", "facts": [{"query": {"season": "2026-27", "player": "Kendrick Nunn", "stats": ["points"], "venue": "away"}, "stat": "points", "field": "per_game"}]}]}
 {"id": "a14", "category": "declines", "turns": [{"question": "Who will win the Euroleague this season?", "facts": [{"declines": true}]}]}
 {"id": "a15", "category": "declines", "turns": [{"question": "How much is Kendrick Nunn paid per year?", "facts": [{"declines": true}]}]}
+{"id": "a16", "category": "declines", "turns": [{"question": "What is Facundo Campazzo's plus-minus when he is on the floor together with Walter Tavares this season?", "facts": [{"declines": true}]}]}

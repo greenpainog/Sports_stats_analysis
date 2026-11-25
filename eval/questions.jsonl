@@ -97,3 +97,6 @@
 {"id": "r97", "category": "ranking", "question": "How many offensive rebounds does Real Madrid allow per game this season?", "gold": {"ranking": {"kind": "team_rankings", "team": "Real Madrid", "stats": ["offensive_rebounds"], "side": "opponent", "season": "2026-27"}}}
 {"id": "r98", "category": "ranking", "question": "What 3-point percentage do opponents shoot against Fenerbahce this season?", "gold": {"ranking": {"kind": "team_rankings", "team": "Fenerbahce Tarfin Istanbul", "stats": ["fg3_pct"], "side": "opponent", "season": "2026-27"}}}
 {"id": "r99", "category": "ranking", "question": "Baskonia points conceded per game in away games this season", "gold": {"ranking": {"kind": "team_rankings", "team": "Kosner Baskonia Vitoria-Gasteiz", "stats": ["points"], "side": "opponent", "venue": "away", "season": "2026-27"}}}
+{"id": "u100", "category": "unanswerable", "question": "What's Campazzo's plus minus when he's on the floor with Tavares this season?", "gold": null}
+{"id": "u101", "category": "unanswerable", "question": "Olympiacos net rating with Vezenkov and Fournier on the court together", "gold": null}
+{"id": "w102", "category": "with_without", "question": "Campazzo assists in games when Tavares plays this season", "gold": {"stats": ["assists"], "player": "Facundo Campazzo", "with_player": "Walter Tavares", "season": "2026-27"}}

@@ -60,10 +60,12 @@ class Filters(BaseModel):
     )
     without_player: Optional[str] = Field(
         None,
-        description="Only games this player missed, in seasons when he played for either team.",
+        description="Only games this player missed, in seasons when he played for either team. Whole games, "
+                    "not the minutes he sat on the bench.",
     )
     with_player: Optional[str] = Field(
-        None, description="Only games in which this player appeared (for either team)."
+        None, description="Only games in which this player appeared (for either team). Whole games, not the "
+                          "minutes both were on the floor: on-floor combinations are not in the data."
     )
     against_player: Optional[str] = Field(
         None, description="Only games in which this player played for the opponent, e.g. 'against Theis'."
