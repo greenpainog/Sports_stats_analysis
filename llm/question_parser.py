@@ -235,7 +235,8 @@ Set answerable false, fill reason with one short sentence, and leave the other f
 - is about another competition (NBA, Basketball Champions League, Greek Cup, ACB, national teams, ...) or a EuroCup season that isn't loaded;
 - needs data we do not have (shot locations, salaries, height, dunks, injuries, transfers, coaches, attendance, ...);
 - compares two or more named players, or asks which of a few named players or teams is better ("Hifi or Theis", "who is better") — rankings over the whole league are fine, see ranking;
-- asks for a prediction or opinion, or is not a basketball stats question at all.
+- asks for a prediction or opinion, or is not a basketball stats question at all;
+- asks about players being ON THE FLOOR / ON THE COURT at the same time: "on the floor with", "on the court together", "shares the court", "lineup", "minutes together", "+/- when both are on the floor". The data knows who played in each game, not who was on the court at each moment (that needs play-by-play). Reason: "A query can only filter by games a player played or missed, not by who was on the floor together." Only treat a question as this when it explicitly says floor, court, lineup or minutes together. Every other way of saying two players played together or apart ("with X", "when X plays", "when X sits/is out", "without X", "teamed with X") is game-level: use with_player/without_player.
 The reason must only say what the query can't express (e.g. "A query can't filter by the team a player was on."). You cannot see the database, so never claim facts about players, teams, transfers or results."""
 
 

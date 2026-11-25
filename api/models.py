@@ -60,10 +60,12 @@ class Filters(BaseModel):
     )
     without_player: Optional[str] = Field(
         None,
-        description="Only games this player missed, in seasons when he played for either team.",
+        description="Only games this player missed, in seasons when he played for either team. Whole games, "
+                    "not the minutes he sat on the bench.",
     )
     with_player: Optional[str] = Field(
-        None, description="Only games in which this player appeared (for either team)."
+        None, description="Only games in which this player appeared (for either team). Whole games, not the "
+                          "minutes both were on the floor: on-floor combinations are not in the data."
     )
     against_player: Optional[str] = Field(
         None, description="Only games in which this player played for the opponent, e.g. 'against Theis'."
@@ -174,6 +176,17 @@ class QuerySpec(Filters):
                 raise ValueError(f"Compare side '{label}' is invalid: {exc}") from exc
         if len({label for label, _ in sides}) != len(sides):
             raise ValueError("Compare sides need different labels.")
+        # Shared filters apply to every side and a side can't remove them, so
+        # {last_n: 6} on top plus a "season" side makes both sides the last 6.
+        merged = {}
+        for label, spec in sides:
+            key = json.dumps(spec.model_dump(), sort_keys=True, default=str)
+            if key in merged:
+                raise ValueError(
+                    f"Compare sides '{merged[key]}' and '{label}' ask for the same games once the shared "
+                    "filters are added. Top-level filters apply to every side: put the filter that differs "
+                    "(e.g. last_n) only in the side that needs it.")
+            merged[key] = label
         return sides
 
 
@@ -260,6 +273,36 @@ class AskResponse(BaseModel):
     ranking_result: Optional[
         "RankingsResponse | MatchupResponse | PlayerRankingsResponse | PlayerProfileResponse"] = None
     candidates: list[Candidate] = []
+
+
+class AgentRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=500, examples=[
+        "Is Panathinaikos rebounding better in its last 6 games than over the season?"])
+    conversation_id: Optional[str] = Field(None, pattern=r"^[A-Za-z0-9_-]{1,64}$", description=(
+        "Leave out to start a conversation; send back the id from the response to ask a follow-up "
+        "(\"and Zalgiris?\"). Conversations are kept in memory and lost when the server restarts."))
+
+
+class AgentStep(BaseModel):
+    """One tool call the agent made, in order."""
+
+    tool: str
+    args: dict = Field(description="The arguments the LLM filled in (validated before the tool ran).")
+    result: str = Field(description="What the tool returned, which is what the LLM read.")
+
+
+class AgentResponse(BaseModel):
+    """The agent's answer and every tool call behind it."""
+
+    question: str
+    conversation_id: str = Field(description="Send this with the next question to continue the conversation.")
+    status: Literal["answered", "error"] = Field(
+        description="answered: answer is set. error: the LLM call failed.")
+    answer: str
+    check: Optional[Literal["passed", "fixed", "fallback"]] = Field(None, description=(
+        "The number check: passed (every number came from a tool result), fixed (it passed after one "
+        "retry) or fallback (it failed twice, so the answer is the raw tool results)."))
+    steps: list[AgentStep] = []
 
 
 QueryResponse.model_rebuild()  # resolve the forward reference to ComparisonSide
