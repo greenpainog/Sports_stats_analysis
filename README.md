@@ -7,8 +7,11 @@ the LLM, builds the SQL.
 **Status:**
 - **Data:** three seasons of Euroleague (862 games), two of EuroCup (323) and the Greek league
   (381), about 890,000 stat rows, kept current by a daily update job.
-- **Quality:** 98-99 of 99 eval questions right, plus a 12-question held-out set, 214 tests.
-- **Runs** in Docker. Next: a LangGraph agent for multi-step questions, then Azure.
+- **Quality:** 98-99 of 99 eval questions right, plus a 12-question held-out set; 15/15 on the
+  agent's own eval; 263 tests.
+- **Two ways to ask:** `POST /ask` for one lookup, and `POST /agent`, a LangGraph agent that
+  plans several lookups and remembers the conversation for follow-ups.
+- **Runs** in Docker. Next: Azure.
 
 ## Demo
 
@@ -117,6 +120,60 @@ A query can't predict who will win the Euroleague.
 The last one is a refusal on purpose: when the data can't answer a question, the app says so
 instead of guessing.
 
+## Multi-step questions and follow-ups (`POST /agent`)
+
+Some questions need more than one lookup, or build on the previous one. `POST /agent` runs a
+LangGraph agent: the LLM picks a tool, reads the result, and calls more until it can answer.
+A real conversation from 2026-11-25 (fields left at their defaults are not shown):
+
+**"Is Panathinaikos rebounding better in its last 6 games than over the whole season?"**
+
+```json
+{"tool": "query_stats", "args": {"team": "Panathinaikos", "season": "2026-27", "stats": ["total_rebounds"],
+  "compare": [{"label": "Last 6", "season": "2026-27", "last_n": 6}, {"label": "Season", "season": "2026-27"}]}}
+```
+
+> Yes. Panathinaikos is averaging **37.7 rebounds per game** over its last **6** games, compared
+> with **36.9** across **14** games this season. *(number check: passed)*
+
+**"And Zalgiris?"** (same `conversation_id`)
+
+```json
+{"tool": "query_stats", "args": {"team": "Zalgiris", "season": "2026-27", "stats": ["total_rebounds"],
+  "compare": [{"label": "Last 6", "season": "2026-27", "last_n": 6}, {"label": "Season", "season": "2026-27"}]}}
+```
+
+> Yes. Zalgiris is averaging **42.5 rebounds per game** in its last **6** games, up from **40.4**
+> across **13** games this season. *(number check: passed)*
+
+```mermaid
+flowchart LR
+    Q["Question<br/>(+ earlier turns)"] --> A["LLM picks<br/>a tool"]
+    A -- "tool call" --> T["Tool: validated query,<br/>code builds the SQL"]
+    T -- "result" --> A
+    A -- "more than 6 calls" --> F["Answer from<br/>what it has"]
+    A -- "answer" --> C{"Every number<br/>in a tool result?"}
+    F --> C
+    C -- yes --> R["Answer + steps"]
+    C -- "no, first time" --> A
+    C -- "no, again" --> X["Raw tool results<br/>instead"]
+```
+
+**The same guarantees as `/ask`, plus a few more:**
+- **The tools are the existing queries:** stats with filters, team and player rankings, matchup,
+  profile, name lookup, roster. The LLM fills in their validated arguments, never SQL, and every
+  tool only reads.
+- **At most 6 tool calls per question,** so it can't loop or run up a bill.
+- **Every number in the answer is checked** against the tool results. An unbacked number is
+  sent back to the LLM once; if it is still there, you get the raw tool results instead.
+- **Every step is in the response:** each tool, its arguments and its result, so any answer can
+  be traced.
+- **Follow-ups:** send back the `conversation_id`, and "And Zalgiris?" keeps the earlier stats
+  and filters. Conversations are kept in memory (lost on restart).
+
+It is slower than `/ask` (several LLM calls, usually 5-15 s), so `/ask` stays the fast path for
+one-lookup questions.
+
 ## How it works
 
 ```mermaid
@@ -169,11 +226,21 @@ they test whether the parser generalizes rather than recognizes its own examples
 | --- | --- |
 | Main (99 questions) | 98-99/99, depending on the run |
 | Held-out (12) | 12/12 |
+| Agent (15 conversations, 32 facts) | 15/15 and 32/32 in two runs, no fallback answers |
+
+`eval/agent_questions.jsonl` tests the agent:
+- **15 conversations (18 turns):** compares, two teams or players, find-then-look-up,
+  with/without, follow-ups, and questions it must decline.
+- **Each expected fact is a reference query the eval runs itself,** so newly loaded games never
+  make the set stale.
+- **A turn passes when its answer states every fact.**
 
 ```powershell
 python -m eval.run_eval --check-gold                          # no LLM: every gold answer runs
 python -m eval.run_eval                                       # accuracy per category + failures
 python -m eval.run_eval --file eval/heldout_questions.jsonl
+python -m eval.run_agent_eval --check-gold                    # no LLM: every reference query runs
+python -m eval.run_agent_eval                                 # the agent, with the real model
 ```
 
 ## Quick start
@@ -198,7 +265,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python init_db.py                 # creates any missing tables; never deletes data
-copy .env.example .env            # then add your OpenAI key (needed for /ask and the eval)
+copy .env.example .env            # then add your OpenAI key (needed for /ask, /agent and the evals)
 python -m ingestion.euroleague --season 2026    # load a season (cached in data/raw/)
 uvicorn api.main:app --reload     # then open http://127.0.0.1:8000/docs
 python -m pytest
@@ -230,7 +297,8 @@ Every endpoint, filter and stat is in [docs/REFERENCE.md](docs/REFERENCE.md).
 - **Language:** Python 3.13.
 - **Database:** SQLite, with no ORM. Queries are hand-written and parameterized.
 - **API:** FastAPI, with Pydantic for every request and the LLM's output.
-- **LLM:** OpenAI Structured Outputs.
+- **LLM:** OpenAI Structured Outputs (`/ask`); LangGraph with `langchain-openai` tool calling
+  (`/agent`).
 - **Data:** pandas, from the `euroleague-api` package.
 - **Tests and running:** pytest, Docker.
 
@@ -256,4 +324,4 @@ Every endpoint, filter and stat is in [docs/REFERENCE.md](docs/REFERENCE.md).
 4. FastAPI + Pydantic API ✅
 5. LLM question → validated `QuerySpec`, with an eval set ✅
 6. Greek league and EuroCup ✅
-7. Docker ✅ · README demo ✅ · LangGraph agent for multi-step questions · Azure deployment
+7. Docker ✅ · README demo ✅ · LangGraph agent for multi-step questions ✅ · Azure deployment

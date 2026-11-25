@@ -39,6 +39,46 @@ Pydantic, with one retry that sends the errors back to the model, and then runs 
 `POST /query`. The LLM never writes SQL. The response `status` is `answered`, `unanswerable`,
 `needs_clarification` (unknown or ambiguous name, with candidates), `invalid`, or `error` (503).
 
+**The agent (`POST /agent`)** answers questions that need several lookups, and follow-ups:
+
+```json
+{"question": "Is Panathinaikos rebounding better in its last 6 games than over the season?"}
+{"question": "And Zalgiris?", "conversation_id": "<from the first response>"}
+```
+
+The response has `answer`, `conversation_id`, `check` and `steps` (each tool call with its
+arguments and result, nulls left out). `status` is `answered`, or `error` (503) when the OpenAI
+call fails.
+- **Tools** (`agent/tools.py`): `query_stats` (a `QuerySpec`, compare included), `team_rankings`,
+  `matchup`, `player_rankings`, `player_profile`, `resolve_name` and `team_roster`. Each reuses
+  the matching endpoint's Pydantic model, so a tool call is validated like a request. Problems come
+  back to the LLM as text starting with `Error:`, so it can fix its call.
+- **Graph** (`agent/graph.py`): agent → tools → agent while the LLM asks for tools, at most 6 tool
+  calls per question. Past that, the LLM answers without tools from what it has.
+- **Number check** (`agent/verify.py`):
+  - Every number in the answer must be in a tool result or the question.
+  - Seasons and dates are skipped. A difference counts only when both of its numbers are in the
+    answer.
+  - `check` is `passed`, `fixed` (passed after one retry) or `fallback` (the raw tool results are
+    returned instead).
+  - It doesn't check numbers written as words, or a real number attached to the wrong player.
+- **Conversations:**
+  - Kept in LangGraph's `InMemorySaver`, keyed by `conversation_id` (made for you when left out).
+  - The LLM sees the last 5 questions.
+  - They live in the server process: lost on restart, not shared between several servers, and not
+    capped in number yet.
+- **Compare sides must ask for different games** once the top-level filters are added. A `last_n`
+  at the top level applies to every side, so a "season vs last 6" compare puts `last_n` only in
+  its own side. This rule also applies to `POST /query` and `/ask`.
+
+Evaluate the agent (real model, about 0.5M tokens per full run):
+
+```powershell
+python -m eval.run_agent_eval --check-gold   # no LLM: every reference query runs
+python -m eval.run_agent_eval                # pass/fail per question, number check, tool calls, time
+python -m eval.run_agent_eval --only a04,a12
+```
+
 Evaluate the parser on the question set with hand-written gold specs:
 
 ```powershell
@@ -134,7 +174,8 @@ set the `SPORTS_DB_PATH` environment variable to use another file.
 | `analysis/` | Stat analysis over CSV and DB, plus the keyword question parser |
 | `api/` | FastAPI app (`main.py`) and Pydantic models including `QuerySpec` (`models.py`) |
 | `llm/` | Question → `QuerySpec` with an LLM (`question_parser.py`) |
-| `eval/` | Evaluation set (`questions.jsonl`) and scorer (`run_eval.py`) |
+| `agent/` | The `/agent` LangGraph agent: tools (`tools.py`), graph (`graph.py`), number check (`verify.py`) |
+| `eval/` | Evaluation sets and scorers: `/ask` (`questions.jsonl`, `run_eval.py`) and the agent (`agent_questions.jsonl`, `run_agent_eval.py`) |
 | `ingestion/` | Loads source data into the database (`euroleague.py`) |
 | `tests/` | pytest suite |
 | `ask.py`, `analysis_runner.py` | Older command-line entry points |
