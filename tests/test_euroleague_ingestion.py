@@ -107,9 +107,10 @@ class OneGameTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_game_bundle(self.header, self.boxscore, swapped, "E", 2024, 1)
 
-    def _stat(self, entity_type, side, stat_name, player_id=None):
+    def _stat(self, entity_type, side, stat_name, player_id=None, period="match"):
         for s in self.bundle["stats"]:
-            if (s["entity_type"], s["team"], s["stat_name"]) == (entity_type, side, stat_name):
+            if (s["entity_type"], s["team"], s["stat_name"], s.get("period", "match")) == (
+                    entity_type, side, stat_name, period):
                 if player_id is None or s["player"]["source_player_id"] == player_id:
                     return s["stat_value"]
         raise KeyError(stat_name)
@@ -146,6 +147,20 @@ class OneGameTests(unittest.TestCase):
             self.assertEqual(self._stat("team", side, "total_rebounds"), totr["TotalRebounds"])
             self.assertEqual(self._stat("team", side, "turnovers"), totr["Turnovers"])
 
+    def test_quarter_points_add_up_to_the_final_score(self):
+        # The header's quarter scores are running totals; the bundle stores each quarter's own points.
+        home = [self._stat("team", "home", "points", period=f"q{i}") for i in range(1, 5)]
+        self.assertEqual(home, [17, 19, 21, 20])
+        for side in ("home", "away"):
+            quarters = sum(self._stat("team", side, "points", period=f"q{i}") for i in range(1, 5))
+            self.assertEqual(quarters, self._stat("team", side, "points"))
+
+    def test_coaches_and_referees(self):
+        staff = self.bundle["staff"]
+        self.assertEqual([p["team"] for p in staff if p["role"] == "coach"], ["home", "away"])
+        self.assertEqual(sum(p["role"] == "referee" for p in staff), 3)
+        self.assertIn({"role": "coach", "team": "away", "name": "Ergin Ataman"}, staff)
+
     def test_player_points_add_up_to_team_points(self):
         for side in ("home", "away"):
             player_points = sum(
@@ -168,13 +183,13 @@ class OneGameTests(unittest.TestCase):
                 try:
                     counts = {
                         t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-                        for t in ("games", "teams", "players", "game_appearances", "game_stats")
+                        for t in ("games", "teams", "players", "game_appearances", "game_stats", "game_staff")
                     }
                     home_points = conn.execute(
                         """SELECT gs.stat_value FROM game_stats gs
                            JOIN teams t ON t.id = gs.team_id
                            WHERE gs.entity_type = 'team' AND gs.stat_name = 'points'
-                             AND t.source_team_id = 'BER'"""
+                             AND gs.period = 'match' AND t.source_team_id = 'BER'"""
                     ).fetchone()[0]
                     saved_game = conn.execute(
                         "SELECT round_number, phase, is_neutral_venue FROM games"
@@ -191,7 +206,9 @@ class OneGameTests(unittest.TestCase):
         self.assertEqual(counts["game_appearances"], 21)
         self.assertEqual(home_points, 77)
         # 21 players x 20 stats (18 mapped + minutes + plus_minus) + 2 teams x 19 (18 + minutes)
-        self.assertEqual(counts["game_stats"], 21 * 20 + 2 * 19)
+        # + 2 teams x 4 quarters of points
+        self.assertEqual(counts["game_stats"], 21 * 20 + 2 * 19 + 2 * 4)
+        self.assertEqual(counts["game_staff"], 5)  # 2 coaches + 3 referees, once
 
 
 if __name__ == "__main__":

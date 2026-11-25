@@ -25,6 +25,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from database import db
+from database.schema import create_tables
 from ingestion import esake, euroleague
 
 PROJECT_ROOT = db.PROJECT_ROOT
@@ -124,6 +125,7 @@ def run(today=None):
     log.info("Daily update for %s", season_name)
     backup = backup_database()
     log.info("Backed up the database to %s", backup.name)
+    create_tables()  # adds tables/columns a newer loader needs; never deletes data
     failures = 0
     steps = (("Euroleague", update_euroleague, (season_start, "E")),
              ("EuroCup", update_euroleague, (season_start, "U")),

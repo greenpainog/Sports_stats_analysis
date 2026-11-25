@@ -204,6 +204,35 @@ def minutes_to_float(text):
     return round(int(minutes) + int(seconds) / 60, 2)
 
 
+def quarter_points(header, letter):
+    """{'q1': 17, 'q2': 19, 'q3': 21, 'q4': 20} (+ 'ot') for team "A" or "B".
+
+    The header's quarter scores are running totals (17, 36, 57, 77), and the
+    extra-time score is the final score when there was overtime (0 if not).
+    Several overtimes come as one number, so they are one 'ot' period.
+    """
+    totals = [int(header[f"ScoreQuarter{i}{letter}"]) for i in range(1, 5)]
+    final = int(header[f"Score{letter}"])
+    if any(later < earlier for earlier, later in zip(totals, totals[1:])):
+        raise ValueError(f"Quarter scores for team {letter} are not running totals: {totals}.")
+    extra = int(header.get(f"ScoreExtraTime{letter}") or 0)
+    if (extra or totals[3]) != final:
+        raise ValueError(f"Quarter scores for team {letter} don't add up to the final score {final}.")
+    points = {f"q{i + 1}": total - (totals[i - 1] if i else 0) for i, total in enumerate(totals)}
+    if extra:
+        points["ot"] = final - totals[3]
+    return points
+
+
+def header_staff(header):
+    """The game's coaches (with their side) and referees, display names."""
+    staff = [{"role": "coach", "team": side, "name": player_display_name(header[key])}
+             for side, key in (("home", "CoachA"), ("away", "CoachB")) if _clean(header.get(key))]
+    staff += [{"role": "referee", "name": player_display_name(header[key])}
+              for key in ("Referee1", "Referee2", "Referee3") if _clean(header.get(key))]
+    return staff
+
+
 def season_name(season):
     """2024 -> '2024-25'."""
     return f"{season}-{(season + 1) % 100:02d}"
@@ -353,6 +382,9 @@ def build_game_bundle(header, boxscore, schedule_game, competition, season, game
         raise ValueError(f"Header score does not match the season list for {label}.")
 
     appearances, stats, shot_notes = [], [], []
+    for side, letter in zip(sides, "AB"):  # header team A is the home team (checked above)
+        stats.extend({"entity_type": "team", "team": side, "stat_name": "points", "stat_value": points,
+                      "period": period} for period, points in quarter_points(header, letter).items())
     for side, side_stats, code in zip(sides, team_stats, codes):
         played = {}  # source player id -> player dict, for the shot-list stats below
         for row in side_stats["PlayersStats"]:
@@ -429,6 +461,7 @@ def build_game_bundle(header, boxscore, schedule_game, competition, season, game
         "away_score": int(header["ScoreB"]),
         "appearances": appearances,
         "stats": stats,
+        "staff": header_staff(header),
         "shot_notes": shot_notes,  # not saved; ingest_game reports them
     }
 
@@ -539,11 +572,14 @@ def main():
     parser.add_argument("--competition", choices=sorted(COMPETITION_NAMES), default="E")
     parser.add_argument("--season", type=int, required=True, help="Start year, e.g. 2024")
     parser.add_argument("--game", type=int, help="Game code; omit to load the whole season")
+    parser.add_argument("--cached-only", action="store_true",
+                        help="Reload from data/raw/ without any request (e.g. after a loader change)")
     args = parser.parse_args()
+    download = not args.cached_only
     if args.game is None:
-        failures = ingest_season(args.competition, args.season)
+        failures = ingest_season(args.competition, args.season, download=download)
         raise SystemExit(1 if failures else 0)
-    game_id, note = ingest_game(args.competition, args.season, args.game)
+    game_id, note = ingest_game(args.competition, args.season, args.game, download)
     if note:
         print(f"Note: {note}")
     print(f"Saved {args.competition}{args.season} game {args.game} as games.id={game_id}")

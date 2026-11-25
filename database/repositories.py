@@ -1,4 +1,4 @@
-from database.aliases import save_aliases
+from database.aliases import normalize_name, save_aliases
 from database.db import get_connection
 
 
@@ -300,6 +300,20 @@ def save_game_bundle(game_data):
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (game_id, entity_type, team_id, player_id, stat["stat_name"],
                      *stat_values, period),
+                )
+
+        # Coaches and referees: [{"role": "coach", "team": "home", "name": ...},
+        # {"role": "referee", "name": ...}]. A reload replaces them.
+        if "staff" in game_data:
+            cursor.execute("DELETE FROM game_staff WHERE game_id = ?", (game_id,))
+            for person in game_data["staff"]:
+                team_id = {"home": home_team_id, "away": away_team_id}.get(person.get("team"))
+                if (person["role"] == "coach") != (team_id is not None):
+                    raise ValueError("A coach needs a team side and a referee has none.")
+                cursor.execute(
+                    """INSERT OR IGNORE INTO game_staff (game_id, role, team_id, name, normalized)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (game_id, person["role"], team_id, person["name"], normalize_name(person["name"])),
                 )
 
         conn.commit()
