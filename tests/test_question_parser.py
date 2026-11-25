@@ -11,6 +11,20 @@ from llm.question_parser import LLMCompareSide, LLMQuerySpec, build_instructions
 from tests.test_stat_query import build_test_league
 
 
+@pytest.fixture(scope="module", autouse=True)
+def test_league(tmp_path_factory):
+    """Every test reads the hand-made league, never data/sports_analytics.db.
+
+    The prompt lists the loaded seasons, which build_instructions reads from
+    the database: without this the tests depended on the real data being there.
+    """
+    original = db.DATABASE_FILE
+    db.DATABASE_FILE = str(tmp_path_factory.mktemp("parser") / "league.db")
+    build_test_league()
+    yield
+    db.DATABASE_FILE = original
+
+
 def llm_output(**fields):
     """An LLMQuerySpec with every field empty except the ones given."""
     base = {name: None for name in LLMQuerySpec.model_fields}
