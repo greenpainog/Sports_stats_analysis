@@ -1,0 +1,27 @@
+# Run the test suite on every pull request and on every push to main.
+#
+# The tests need no database, no data files and no OpenAI key: they build a
+# small hand-made league in a temporary folder and use a fake LLM. Tests that
+# read cached raw responses (data/raw/, never committed) skip themselves here.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read  # read-only: the workflow only checks code out and runs tests
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest  # Linux, like the Docker image
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip  # reuse downloaded packages between runs
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q
