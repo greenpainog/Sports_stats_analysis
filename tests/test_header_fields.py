@@ -74,3 +74,9 @@ def test_shared_surname_is_ambiguous():
     with pytest.raises(QueryError, match="could mean several coaches") as exc:
         query_stats(["win_pct"], team="Alpha", coach="Bench")
     assert [name for _, name in exc.value.candidates] == ["Ben Bench", "Bob Bench"]
+
+
+def test_team_roster_names_the_coach():
+    from agent.tools import run_tool
+
+    assert "Head coach: Ann Coach (2 games)" in run_tool("team_roster", {"team": "Alpha", "season": "2024-25"})
