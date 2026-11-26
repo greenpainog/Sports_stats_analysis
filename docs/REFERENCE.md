@@ -54,7 +54,7 @@ The response has `answer`, `conversation_id`, `check` and `steps` (each tool cal
 arguments and result, nulls left out). `status` is `answered`, or `error` (503) when the OpenAI
 call fails.
 - **Tools** (`agent/tools.py`): `query_stats` (a `QuerySpec`, compare included), `team_rankings`,
-  `matchup`, `player_rankings`, `player_profile`, `resolve_name` and `team_roster`. Each reuses
+  `matchup`, `player_rankings`, `player_profile`, `lineup_rankings`, `resolve_name` and `team_roster`. Each reuses
   the matching endpoint's Pydantic model, so a tool call is validated like a request. Problems come
   back to the LLM as text starting with `Error:`, so it can fix its call.
 - **Graph** (`agent/graph.py`): agent → tools → agent while the LLM asks for tools, at most 6 tool
@@ -195,6 +195,24 @@ events in that time, plus `plus_minus`, `points_for` and `points_against`; clutc
 available. Only games with clutch time count (for a player, clutch time on the floor), so
 `win_pct` is the record in clutch games. It combines with every other filter, on-floor ones too.
 
+**Lineups** (`POST /lineups`, Euroleague and EuroCup): a team's duos (`size` 2), trios (3), 4-man
+groups or 5-man lineups, ranked by how they did on the floor together (`analysis/lineups.py`).
+- A group is on the floor together in every stint that holds all its players, so its minutes,
+  points scored and allowed are sums over those stints.
+- `sort`: `net_per_40` (default: plus-minus per 40 minutes together), `plus_minus`, `minutes`
+  ("most used"), `points_for_per_40` or `points_against_per_40` (with `order: "lowest"` for the
+  best defense). `with_players` keeps only groups that include those players ("best duo with X").
+- **No minimum-minutes cutoff.** Every group that shared the floor is listed. Groups under 40
+  minutes together are flagged `small_sample` (`[SMALL SAMPLE ...]` in the text): a +4 in 3
+  minutes is +53 per 40 and says little.
+- "Net per 40" is plus-minus per 40 minutes, not a per-100-possessions net rating.
+- Filters: `season` or `seasons`, `phase`, `last_n` (the team's last N games). Games with broken
+  substitutions are left out and listed in `notes`.
+
+```json
+{"team": "Panathinaikos", "size": 2, "season": "2026-27", "limit": 5}
+```
+
 **Box-score stats from events.** Each event maps to a stat (`EVENT_STATS` in
 `ingestion/play_by_play.py`: `2FGM` = 2 points and a made 2, `FV` = block, `RV` = foul drawn, ...).
 Summed per game they match the box score in every player-game for 14 of the 17 stats; blocks,
@@ -220,7 +238,20 @@ top them. Filters as for teams, plus `team`; `limit` (default 50) trims rows, no
 best defense?", "top 5 scorers", "Panathinaikos vs Virtus full stats" and "where does Vezenkov rank
 in every stat?" are turned into one of the four ranking requests above (`ranking_kind`,
 `ranking_spec` and `ranking_result` in the response). "The most assists" means season totals;
-"leads in"/"top scorers" means per game.
+"leads in"/"top scorers" means per game. "Panathinaikos' best duo", "Real's most used lineup" and
+"best trio with Campazzo" become a lineups request (`ranking_kind: "lineups"`).
+
+**This season with few or no games** (`/ask` and `/agent`). A question with no season or time span
+means this season. When this season has fewer than 5 matching games (`FEW_GAMES` in
+`api/service.py`), last season comes in:
+- **0 games** (e.g. a matchup not played yet): the answer is last season's, and says so.
+  `season_fallback: "previous_season"`, `fallback_season` names it, `result` is last season's.
+- **1-4 games:** the answer is this season's, marked `SMALL SAMPLE`, with last season after it.
+  `season_fallback: "with_previous_season"`, last season in `previous_season_result`.
+- Not when the question names the season ("this season", "2026-27", "so far", "this year"): then it
+  gets exactly that season. Nor for `last_n`, several seasons or a compare across seasons. Counts:
+  games behind the answer (for rankings, the focus team's or player's games, or the most any team
+  or player played). `POST /query` and the ranking endpoints never fall back.
 
 The database path defaults to `data/sports_analytics.db` in the project folder;
 set the `SPORTS_DB_PATH` environment variable to use another file.

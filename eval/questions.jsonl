@@ -124,3 +124,10 @@
 {"id": "s124", "category": "default_season", "question": "What are Kendrick Nunn's career points per game?", "gold": {"stats": ["points"], "player": "Kendrick Nunn"}}
 {"id": "s125", "category": "default_season", "question": "Who leads the Euroleague in assists per game?", "gold": {"ranking": {"kind": "player_rankings", "stats": ["assists"], "season": "2026-27"}}}
 {"id": "s126", "category": "default_season", "question": "Campazzo's points in his last 10 games", "gold": {"stats": ["points"], "player": "Facundo Campazzo", "last_n": 10}}
+{"id": "l127", "category": "lineups", "question": "Who is Panathinaikos' best duo?", "gold": {"ranking": {"kind": "lineups", "team": "Panathinaikos", "season": "2026-27"}}}
+{"id": "l128", "category": "lineups", "question": "Real Madrid's most used 5-man lineup this season", "gold": {"ranking": {"kind": "lineups", "team": "Real Madrid", "lineup_size": 5, "lineup_sort": "minutes", "season": "2026-27"}}}
+{"id": "l129", "category": "lineups", "question": "Best trio with Campazzo on the floor for Real Madrid", "gold": {"ranking": {"kind": "lineups", "team": "Real Madrid", "lineup_size": 3, "lineup_players": ["Facundo Campazzo"], "season": "2026-27"}}}
+{"id": "l130", "category": "lineups", "question": "Olympiacos worst two-man combination by net rating", "gold": {"ranking": {"kind": "lineups", "team": "Olympiacos", "order": "lowest", "season": "2026-27"}}}
+{"id": "l131", "category": "lineups", "question": "Which Fenerbahce pair allows the fewest points per 40 minutes together?", "gold": {"ranking": {"kind": "lineups", "team": "Fenerbahce", "lineup_sort": "points_against_per_40", "order": "lowest", "season": "2026-27"}}}
+{"id": "l132", "category": "lineups", "question": "Top 3 Zalgiris lineups last season", "gold": {"ranking": {"kind": "lineups", "team": "Zalgiris", "lineup_size": 5, "limit": 3, "season": "2025-26"}}}
+{"id": "l133", "category": "lineups", "question": "Best duo for Panionios in the Greek league", "gold": null}

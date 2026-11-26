@@ -142,10 +142,11 @@ def score_ranking(gold, parsed):
         return False, exact, f"query failed: {exc}"
     expected = run_ranking(expected_request)
     # "Who leads in steals" doesn't say how many players to list: compare the rows both show.
-    if got["kind"] == expected["kind"] == "player_rankings":
-        shown = min(len(got["result"]["players"]), len(expected["result"]["players"]))
-        for side in (got, expected):
-            side["result"]["players"] = side["result"]["players"][:shown]
+    for kind, rows in (("player_rankings", "players"), ("lineups", "lineups")):
+        if got["kind"] == expected["kind"] == kind:
+            shown = min(len(got["result"][rows]), len(expected["result"][rows]))
+            for side in (got, expected):
+                side["result"][rows] = side["result"][rows][:shown]
     if got == expected:
         return True, exact, ""
     diffs = [part for part in ("kind", "focus", "result") if got[part] != expected[part]]

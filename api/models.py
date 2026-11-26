@@ -313,12 +313,20 @@ class AskResponse(BaseModel):
     message: str
     spec: Optional[QuerySpec] = Field(None, description="The structured query the question was turned into.")
     result: Optional[QueryResponse] = None
-    ranking_kind: Optional[Literal["team_rankings", "matchup", "player_rankings", "player_profile"]] = Field(
+    ranking_kind: Optional[Literal["team_rankings", "matchup", "player_rankings", "player_profile", "lineups"]] = Field(
         None, description="Set for ranking questions instead of spec/result.")
     ranking_spec: Optional[dict] = Field(None, description="The ranking request the question was turned into.")
     ranking_result: Optional[
-        "RankingsResponse | MatchupResponse | PlayerRankingsResponse | PlayerProfileResponse"] = None
+        "RankingsResponse | MatchupResponse | PlayerRankingsResponse | PlayerProfileResponse | LineupsResponse"] = None
     candidates: list[Candidate] = []
+    season_fallback: Optional[Literal["previous_season", "with_previous_season"]] = Field(None, description=(
+        "Set when the question named no season and this season had too few matching games: "
+        "previous_season = no games this season, so result is last season's; "
+        "with_previous_season = under 5 games (a small sample), so last season is in previous_season_result too."))
+    fallback_season: Optional[str] = Field(None, description="The season used for the fallback (last season).")
+    previous_season_result: Optional[
+        "QueryResponse | RankingsResponse | MatchupResponse | PlayerRankingsResponse | PlayerProfileResponse "
+        "| LineupsResponse"] = None
 
 
 class AgentRequest(BaseModel):
@@ -504,6 +512,66 @@ class PlayerProfileResponse(BaseModel):
     min_games: int
     ranked_count: int
     player: PlayerRankingRow
+    answer: str
+
+
+# --- Lineups -----------------------------------------------------------------
+
+LineupSort = Literal["net_per_40", "plus_minus", "minutes", "points_for_per_40", "points_against_per_40"]
+
+
+class LineupSpec(BaseModel):
+    """Rank a team's duos, trios, 4- or 5-man lineups by how they did on the floor together."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    team: str = Field(description="The team, e.g. 'Panathinaikos'.")
+    size: Literal[2, 3, 4, 5] = Field(2, description="Players in the group: 2 = duos, 3 = trios, 5 = full lineups.")
+    with_players: Optional[list[str]] = Field(
+        None, max_length=4, description="Only groups that include all of these players, e.g. the best duo with one player.")
+    competition: Literal["euroleague", "eurocup"] = Field(
+        "euroleague", description="Lineups need play-by-play: Euroleague and EuroCup only.")
+    season: Optional[SeasonName] = None
+    seasons: Optional[list[SeasonName]] = Field(None, min_length=2, max_length=10)
+    phase: Optional[Phase] = None
+    last_n: Optional[int] = Field(None, ge=1, le=100, description="Only the team's N most recent games.")
+    sort: LineupSort = Field("net_per_40", description=(
+        "net_per_40 = plus-minus per 40 minutes together (the default 'best'); plus_minus = total; minutes = most "
+        "used; points_for_per_40 / points_against_per_40 = offense / defense."))
+    order: Literal["highest", "lowest"] = Field(
+        "highest", description="'lowest' for the worst lineups, or the best defense with points_against_per_40.")
+    limit: int = Field(10, ge=1, le=50, description="Lineups listed; there is no minimum-minutes cutoff.")
+
+    @model_validator(mode="after")
+    def check_lineup(self):
+        if self.season is not None and self.seasons is not None:
+            raise ValueError("Give either season or seasons, not both.")
+        if self.with_players and len(self.with_players) >= self.size:
+            raise ValueError(f"A {self.size}-man lineup can include at most {self.size - 1} named players.")
+        return self
+
+
+class LineupRow(BaseModel):
+    players: list[str]
+    games: int
+    minutes: float
+    points_for: int
+    points_against: int
+    plus_minus: int
+    net_per_40: float = Field(description="Plus-minus per 40 minutes together.")
+    small_sample: bool = Field(description="True when under 40 minutes together: read the per-40 numbers with care.")
+
+
+class LineupsResponse(BaseModel):
+    team: str
+    size: int
+    sort: str
+    order: str
+    filters: dict
+    games: int = Field(description="Games the lineups were counted over (games with sound play-by-play).")
+    lineup_count: int = Field(description="Every group that played together, before the limit.")
+    lineups: list[LineupRow]
+    notes: list[str] = []
     answer: str
 
 

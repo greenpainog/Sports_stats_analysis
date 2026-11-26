@@ -36,8 +36,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from agent.verify import numbers
-from api.models import PlayerRankingSpec, QuerySpec, RankingSpec
-from api.service import answer_spec, player_rankings_spec, rankings_spec
+from api.models import LineupSpec, PlayerRankingSpec, QuerySpec, RankingSpec
+from api.service import answer_spec, lineups_spec, player_rankings_spec, rankings_spec
 from database.aliases import _TABLES, normalize_name, player_name_variants, resolve_team
 from database.db import get_connection
 
@@ -97,6 +97,11 @@ def gold_value(fact):
         if fact["field"] == "player":
             return "player", row.player
         return "number", row.values[fact["stat"]]
+    if "lineups" in fact:
+        row = lineups_spec(LineupSpec(**fact["lineups"])).lineups[fact["pick"] - 1]
+        if fact["field"] == "member":
+            return "player", row.players[fact["member"]]
+        return "number", getattr(row, fact["field"])
     raise ValueError(f"unknown fact: {fact}")
 
 

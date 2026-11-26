@@ -9,6 +9,11 @@ The LLM never writes SQL: it can only pick one of these tools and fill in its
 argument model, which Pydantic validates before anything runs. Every tool only
 reads the database.
 
+season_named: whether the user's question named a season itself. When it
+didn't and this season has fewer than 5 matching games, the stat and ranking
+tools add (or, with no games, use) last season, labelled, like /ask does
+(api/service.with_season_fallback).
+
 A tool never raises for a bad question: unknown names, impossible filters and
 invalid arguments come back as text starting with "Error:", so the agent can
 correct itself (for example, look the name up with resolve_name and retry).
@@ -19,9 +24,11 @@ from typing import Callable, Literal, Optional
 from pydantic import BaseModel, Field, ValidationError
 
 from analysis.stat_query import COMPETITIONS, QueryError
-from api.models import MatchupSpec, PlayerProfileSpec, PlayerRankingSpec, QuerySpec, RankingSpec
+from api.models import LineupSpec, MatchupSpec, PlayerProfileSpec, PlayerRankingSpec, QuerySpec, RankingSpec
 from api.service import (
-    answer_spec,
+    answer_ranking_for_question,
+    answer_spec_for_question,
+    lineups_spec,
     matchup_spec,
     player_profile_spec,
     player_rankings_spec,
@@ -61,30 +68,38 @@ class TeamRosterArgs(BaseModel):
 
 # --- Tools -------------------------------------------------------------------
 
-def query_stats(spec: QuerySpec) -> str:
+def query_stats(spec: QuerySpec, season_named=True) -> str:
     """One player's or team's stats with any filters (opponent, venue, last N, with/without a player, ...)."""
-    return answer_spec(spec).answer
+    return answer_spec_for_question(spec, season_named).text
 
 
-def team_rankings(args: TeamRankingsArgs) -> str:
-    focus = args.team
-    result = rankings_spec(RankingSpec(**args.model_dump(exclude={"team"})))
-    return team_rankings_text(result, focus)
+def _ranked(kind, spec, season_named, focus_team=None):
+    from llm.question_parser import RankingRequest
+
+    return answer_ranking_for_question(RankingRequest(kind, spec, focus_team), season_named).text
 
 
-def matchup(spec: MatchupSpec) -> str:
-    return matchup_spec(spec).answer
+def team_rankings(args: TeamRankingsArgs, season_named=True) -> str:
+    return _ranked("team_rankings", RankingSpec(**args.model_dump(exclude={"team"})), season_named, args.team)
 
 
-def player_rankings(args: PlayerRankingsArgs) -> str:
-    return player_rankings_text(player_rankings_spec(args))
+def matchup(spec: MatchupSpec, season_named=True) -> str:
+    return _ranked("matchup", spec, season_named)
 
 
-def player_profile(spec: PlayerProfileSpec) -> str:
-    return player_profile_spec(spec).answer
+def player_rankings(args: PlayerRankingsArgs, season_named=True) -> str:
+    return _ranked("player_rankings", args, season_named)
 
 
-def resolve_name(args: ResolveNameArgs) -> str:
+def player_profile(spec: PlayerProfileSpec, season_named=True) -> str:
+    return _ranked("player_profile", spec, season_named)
+
+
+def lineup_rankings(spec: LineupSpec, season_named=True) -> str:
+    return _ranked("lineups", spec, season_named)
+
+
+def resolve_name(args: ResolveNameArgs, season_named=True) -> str:
     result = (resolve_team if args.kind == "team" else resolve_player)(args.name)
     if result.status == "not_found":
         return f"No {args.kind} matches '{args.name}'."
@@ -111,7 +126,7 @@ ORDER BY minutes DESC, games DESC
 """
 
 
-def team_roster(args: TeamRosterArgs) -> str:
+def team_roster(args: TeamRosterArgs, season_named=True) -> str:
     """Who played for a team in a season: games, starts and minutes per game, most minutes first."""
     found = resolve_team(args.team)
     if found.status != "match":
@@ -155,7 +170,7 @@ def team_roster(args: TeamRosterArgs) -> str:
 class Tool:
     name: str
     args: type  # the Pydantic model the LLM fills in
-    run: Callable[[BaseModel], str]
+    run: Callable[..., str]  # (args, season_named) -> text
     description: str  # what the LLM reads to choose a tool
 
 
@@ -180,6 +195,11 @@ TOOLS = {tool.name: tool for tool in (
          "List the league's (or one team's) players by a stat: leaders, top N."),
     Tool("player_profile", PlayerProfileSpec, player_profile,
          "One player's value and league rank in every player stat."),
+    Tool("lineup_rankings", LineupSpec, lineup_rankings,
+         "A team's duos (size 2), trios (3) or 5-man lineups ranked by how they did on the floor together: "
+         "plus-minus per 40 minutes by default ('best duo', 'net rating'), or sort by minutes ('most used'), "
+         "points_for_per_40 or points_against_per_40. with_players keeps only groups with those players "
+         "('best duo with X'). No minutes cutoff: groups under 40 minutes together are marked SMALL SAMPLE."),
     Tool("resolve_name", ResolveNameArgs, resolve_name,
          "Check what a team or player name refers to, or list candidates when it is ambiguous."),
     Tool("team_roster", TeamRosterArgs, team_roster,
@@ -187,7 +207,7 @@ TOOLS = {tool.name: tool for tool in (
 )}
 
 
-def run_tool(name: str, raw_args: dict) -> str:
+def run_tool(name: str, raw_args: dict, season_named: bool = True) -> str:
     """Validate raw_args (from the LLM) against the tool's model and run it.
 
     Always returns text: the answer, or "Error: ..." for an unknown tool,
@@ -202,7 +222,7 @@ def run_tool(name: str, raw_args: dict) -> str:
         problems = "; ".join(f"{'.'.join(map(str, e['loc'])) or 'arguments'}: {e['msg']}" for e in exc.errors())
         return f"Error: invalid arguments for {name}: {problems}"
     try:
-        return tool.run(args)
+        return tool.run(args, season_named)
     except QueryError as exc:
         hint = f" Candidates: {', '.join(name for _, name in exc.candidates)}." if exc.candidates else ""
         return f"Error: {exc}{hint}"
