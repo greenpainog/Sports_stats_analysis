@@ -10,6 +10,8 @@
                 seasons=["2025-26", "2026-27"])
     query_stats(["win_pct", "turnovers", "fg_pct"], team="Olympiacos", max_rest_hours=48)
     query_stats(["minutes", "plus_minus"], player="Campazzo", on_floor_with=["Tavares"])
+    query_stats(["points", "fg_pct"], player="Campazzo", clutch=True)
+    query_stats(["points_q4"], player="Campazzo")
 
 Names are resolved through the alias tables. The SQL is always built here from
 these arguments, never written by a caller (later, never by the LLM). Filters
@@ -18,8 +20,11 @@ means the 5 most recent games against Real.
 """
 from dataclasses import dataclass, field
 
+from analysis import pbp_query
+from analysis.pbp_query import CLUTCH_DESCRIPTION, EVENT_PERCENTAGES
 from database.aliases import resolve_player, resolve_staff, resolve_team
 from database.db import get_connection
+from ingestion.play_by_play import EVENT_STATS
 
 # Stats stored per game in game_stats. Ingestion must store exactly these
 # names (a test checks the Euroleague mapping against this list).
@@ -50,19 +55,21 @@ RESULT_STATS = ("win_pct",)
 
 # A team's points per quarter and half (Euroleague and EuroCup), from the
 # header's quarter scores. Stored as "points" rows with period q1-q4 (and ot);
-# read back as points_q1 ... and added up into the halves. Teams only: player
-# quarters need play-by-play.
+# read back as points_q1 ... and added up into the halves. A player's quarters
+# come from his scoring events in the play-by-play.
 QUARTER_STATS = ("points_q1", "points_q2", "points_q3", "points_q4", "points_first_half", "points_second_half")
 HALVES = {"points_first_half": ("points_q1", "points_q2"), "points_second_half": ("points_q3", "points_q4")}
 
 
-# Stats of the time a lineup condition held, from the stints (see
-# ingestion/play_by_play.py): minutes on the floor, plus-minus, and the
-# team's points scored and allowed in that time. With on_floor_with /
-# on_floor_without only these (and win_pct) can be asked; points_for and
-# points_against always come from the stints. Euroleague and EuroCup only.
-ON_FLOOR_STATS = ("minutes", "plus_minus", "points_for", "points_against")
+# Play-by-play questions (Euroleague and EuroCup; see analysis/pbp_query.py):
+# - on_floor_with / on_floor_without: the time a lineup condition held.
+#   minutes, plus_minus, points_for and points_against come from the stints;
+#   box-score stats (points, rebounds, fg_pct, ...) from the events.
+# - clutch: only events in clutch time; the same stats except minutes.
+# points_for / points_against (the team's points while the subject was on the
+# floor) exist only here.
 STINT_ONLY_STATS = ("points_for", "points_against")
+PBP_BOX_STATS = tuple(EVENT_STATS) + EVENT_PERCENTAGES
 MAX_ON_FLOOR_PLAYERS = 4
 
 
@@ -161,6 +168,7 @@ class QueryResult:
     games: list = field(default_factory=list)
     summary: dict = field(default_factory=dict)  # stat -> StatSummary
     on_floor: bool = False  # minutes/plus-minus/points are of the on-floor time, from stints
+    scope: str = ""  # e.g. " with clutch time": which games the count covers
     notes: list = field(default_factory=list)  # e.g. games left out for broken play-by-play
 
     def describe(self):
@@ -170,8 +178,7 @@ class QueryResult:
         if not self.games:
             return "\n".join([f"{self.subject}: no games match ({conditions})."] + notes)
         count = len(self.games)
-        lines = [f"{self.subject} ({conditions}), {count} game{'s' if count != 1 else ''}"
-                 f"{' with on-floor time' if self.on_floor else ''}:"]
+        lines = [f"{self.subject} ({conditions}), {count} game{'s' if count != 1 else ''}{self.scope}:"]
         for s in self.summary.values():
             if self.on_floor and s.stat == "minutes":
                 lines.append(f"  minutes on the floor: {s.total:g} total ({s.per_game:.1f} per game)")
@@ -259,6 +266,7 @@ def query_stats(
     referee=None,
     on_floor_with=None,
     on_floor_without=None,
+    clutch=False,
 ):
     """Return a QueryResult for one player or one team.
 
@@ -293,10 +301,17 @@ def query_stats(
     on_floor_with / on_floor_without: lists of teammates who must be on the
         floor / off the floor at the same time as the subject (a player
         subject is on the floor himself). Stats then cover only that time,
-        from the stints: ON_FLOOR_STATS and win_pct. Games are first chosen
+        minutes, plus_minus, points_for, points_against from the stints. Games are first chosen
         by the other filters (last_n too), and then only games where the
         condition held for some time count. Games with broken substitution
         data (pbp_checks.problems) are left out and listed in `notes`.
+        Box-score stats (points, assists, fg_pct, ...) then count the
+        subject's events in that time.
+    clutch: only clutch time (the last 5 minutes of the 4th quarter or
+        overtime, score within 5): stats counted from the events, plus
+        plus_minus / points_for / points_against; no minutes. Only games
+        with clutch time (for a player: clutch time on the floor) count.
+    A player's points_q1 ... points_second_half come from his scoring events.
     """
     for name, hours in (("max_rest_hours", max_rest_hours), ("min_rest_hours", min_rest_hours)):
         if hours is not None and hours <= 0:
@@ -324,15 +339,25 @@ def query_stats(
             raise QueryError("player_threshold min cannot be more than max.")
 
     on_floor_with, on_floor_without = list(on_floor_with or []), list(on_floor_without or [])
-    on_floor = bool(on_floor_with or on_floor_without or set(stats) & set(STINT_ONLY_STATS))
-    if on_floor:
-        other = [s for s in stats if s not in ON_FLOOR_STATS + RESULT_STATS]
+    lineup = bool(on_floor_with or on_floor_without)
+    # pbp_mode: answered from stints/events instead of the box score.
+    pbp_mode = lineup or clutch or bool(set(stats) & set(STINT_ONLY_STATS))
+    on_floor = pbp_mode and not clutch  # time on the floor is known (from the stints)
+    player_quarters = player is not None and bool(set(stats) & set(QUARTER_STATS))
+    if (pbp_mode or player_quarters) and competition == "greek_league":
+        raise QueryError("This needs play-by-play (clutch time, who was on the floor, a player's quarters), "
+                         "which the Greek league data doesn't have.")
+    if pbp_mode:
+        allowed = set(PBP_BOX_STATS) | {"plus_minus", "win_pct", *STINT_ONLY_STATS}
+        if not clutch:
+            allowed.add("minutes")
+        other = [s for s in stats if s not in allowed]
+        if clutch and "minutes" in other:
+            raise QueryError("Minutes played in clutch time aren't available; clutch stats count events "
+                             "(points, shots, rebounds, assists, ...) and the plus-minus.")
         if other:
-            raise QueryError(
-                f"On-floor questions (who was on the court together) can report only {', '.join(ON_FLOOR_STATS)} "
-                f"and win_pct for now, not {', '.join(other)}.")
-        if competition == "greek_league":
-            raise QueryError("On-floor stats need play-by-play, which the Greek league data doesn't have.")
+            raise QueryError(f"{', '.join(other)} can't be asked with clutch or on-floor filters; available: "
+                             f"{', '.join(sorted(allowed))}.")
         if len(on_floor_with) + len(on_floor_without) > MAX_ON_FLOOR_PLAYERS:
             raise QueryError(f"Name at most {MAX_ON_FLOOR_PLAYERS} on-floor players.")
 
@@ -341,12 +366,11 @@ def query_stats(
         competition_sql, competition_params = competition_where(competition)
         # A team's plus-minus is its point margin, taken from the final score
         # (the source only gives plus-minus for players), so it is never stored.
-        # On-floor stats come from the stints, not game_stats.
-        if not on_floor:
-            _check_stats(conn, [s for s in stats if not (team is not None and s == "plus_minus")], competition)
-        if player is not None and set(stats) & set(QUARTER_STATS):
-            raise QueryError("Quarter and half points are team stats only for now (a player's quarters need "
-                             "play-by-play data, which isn't loaded).")
+        # Clutch and on-floor stats come from the stints and events, not game_stats.
+        if not pbp_mode:
+            # A player's quarters come from his events, not stored quarter rows.
+            _check_stats(conn, [s for s in stats if not (team is not None and s == "plus_minus")
+                                and not (player_quarters and s in QUARTER_STATS)], competition)
         filters, where, params = {}, [competition_sql], list(competition_params)
         if competition != "euroleague":
             filters["competition"] = competition
@@ -474,22 +498,27 @@ def query_stats(
             params.append(last_n)
 
         game_rows = conn.execute(sql, params).fetchall()
+        game_ids = [row[0] for row in game_rows]
         notes = []
-        if on_floor:
-            values = _on_floor_values(conn, subject_type, subject_id, [row[0] for row in game_rows],
-                                      on_floor_with, on_floor_without, filters, notes)
+        if pbp_mode:
+            values = _pbp_values(conn, subject_type, subject_id, game_ids, stats, clutch,
+                                 on_floor_with, on_floor_without, filters, notes)
             game_rows = [row for row in game_rows if row[0] in values]
         else:
-            values = _load_values(conn, subject_type, subject_id, [row[0] for row in game_rows])
+            values = _load_values(conn, subject_type, subject_id, game_ids)
+            if player_quarters:
+                for game_id, quarters in pbp_query.player_quarter_values(conn, subject_id, game_ids).items():
+                    values[game_id] = add_halves({**values.get(game_id, {}), **quarters})
     finally:
         conn.close()
 
+    scope = " with clutch time" if clutch else " with on-floor time" if on_floor else ""
     result = QueryResult(subject=subject, subject_type=subject_type, filters=filters,
-                         on_floor=on_floor, notes=notes)
+                         on_floor=on_floor, scope=scope, notes=notes)
     for game_id, start_time, opp_name, game_venue, team_score, opp_score, rest, opp_rest in reversed(game_rows):
         # Basketball has no draws, so a game is either a win or a loss.
         values.setdefault(game_id, {})["win"] = 1 if team_score > opp_score else 0
-        if subject_type == "team" and not on_floor:
+        if subject_type == "team" and not pbp_mode:
             values[game_id]["plus_minus"] = team_score - opp_score
         result.games.append(GameLine(
             game_id, start_time, opp_name, game_venue, team_score, opp_score, rest, opp_rest,
@@ -500,84 +529,59 @@ def query_stats(
     if on_floor:
         minutes = sum(values[g.game_id]["minutes"] for g in result.games)
         for stat, summary in result.summary.items():
-            if stat in ON_FLOOR_STATS and stat != "minutes" and minutes:
-                summary.value = round(summary.total / minutes * 40, 1)
+            if summary.total is not None and stat != "minutes" and minutes:
+                summary.value = round(summary.total / minutes * 40, 1)  # per 40 minutes on the floor
             if summary.total is not None:
                 summary.total = round(summary.total, 2)
     return result
 
 
-def _on_floor_values(conn, subject_type, subject_id, game_ids, with_names, without_names, filters, notes):
-    """{game_id: {minutes, plus_minus, points_for, points_against}} of the on-floor time.
+def _pbp_values(conn, subject_type, subject_id, game_ids, stats, clutch, with_names, without_names,
+                filters, notes):
+    """{game_id: {stat: value}} for clutch and on-floor questions (see pbp_query).
 
-    Only games where the condition held for more than 0 seconds are returned.
-    Names are resolved here and written into `filters`; games left out
-    because their play-by-play is missing or broken are explained in `notes`.
+    Resolves the on-floor names into `filters`, explains left-out games in
+    `notes`, and returns only games where the condition held at some point.
     """
-    with_ids, without_ids = [], []
+    with_ids, without_ids, named = [], [], []
     for names, ids, key in ((with_names, with_ids, "on_floor_with"),
                             (without_names, without_ids, "on_floor_without")):
         shown = []
         for name in names:
             player_id, player_name = _resolve(lambda t: resolve_player(t, conn), name, "player")
             ids.append(player_id)
+            named.append((player_id, name))
             shown.append(player_name)
         if shown:
             filters[key] = ", ".join(shown)
-    named = with_ids + without_ids
-    if len(set(named)) != len(named):
+    if clutch:
+        filters["clutch"] = CLUTCH_DESCRIPTION
+    all_ids = with_ids + without_ids
+    if len(set(all_ids)) != len(all_ids):
         raise QueryError("Each on-floor player may be named only once (not both on and off the floor).")
-    if subject_type == "player" and subject_id in named:
+    if subject_type == "player" and subject_id in all_ids:
         raise QueryError("The player asked about is always on the floor in his own on-floor stats; "
                          "name only his teammates.")
-    if not game_ids:
-        return {}
 
-    placeholders = ", ".join("?" for _ in game_ids)
-    checked = dict(conn.execute(
-        f"SELECT game_id, problems FROM pbp_checks WHERE game_id IN ({placeholders})", game_ids).fetchall())
-    missing = [g for g in game_ids if g not in checked]
-    broken = [g for g in game_ids if checked.get(g)]
-    if missing:
-        notes.append(f"{len(missing)} matching game(s) have no play-by-play yet and are left out.")
-    if broken:
-        notes.append(f"{len(broken)} game(s) left out: the source's substitutions there don't add up to "
-                     "five players on the floor.")
-    usable = [g for g in game_ids if g in checked and not checked[g]]
+    # A team's clutch stats need no lineups; anything about who was on the floor does.
+    need_lineups = bool(all_ids) or subject_type == "player" or not clutch
+    usable = pbp_query.usable_games(conn, game_ids, need_lineups, notes)
     if not usable:
         return {}
-    placeholders = ", ".join("?" for _ in usable)
+    failed = pbp_query.check_teammates(conn, subject_type, subject_id, usable, named)
+    if failed:
+        raise QueryError(f"'{failed}' wasn't on the same team as the subject in any of these games.")
 
-    # Each named player must be the subject's teammate in at least one of the
-    # games; otherwise "without him" would be true of every stint.
-    for player_id, name in zip(named, list(with_names) + list(without_names)):
-        if subject_type == "player":
-            sql = f"""SELECT COUNT(*) FROM game_appearances o JOIN game_appearances me
-                        ON me.game_id = o.game_id AND me.team_id = o.team_id
-                      WHERE me.player_id = ? AND o.player_id = ? AND o.game_id IN ({placeholders})"""
-        else:
-            sql = f"""SELECT COUNT(*) FROM game_appearances o
-                      WHERE o.team_id = ? AND o.player_id = ? AND o.game_id IN ({placeholders})"""
-        if not conn.execute(sql, [subject_id, player_id, *usable]).fetchone()[0]:
-            raise QueryError(f"'{name}' wasn't on the same team as the subject in any of these games.")
-
-    if subject_type == "player":
-        conditions = ["EXISTS (SELECT 1 FROM stint_players me WHERE me.stint_id = s.id AND me.player_id = ?)"]
-    else:
-        conditions = ["s.team_id = ?"]
-    params = [subject_id]
-    for ids, sign in ((with_ids, "EXISTS"), (without_ids, "NOT EXISTS")):
-        for player_id in ids:
-            conditions.append(f"{sign} (SELECT 1 FROM stint_players o WHERE o.stint_id = s.id AND o.player_id = ?)")
-            params.append(player_id)
-    rows = conn.execute(
-        f"""SELECT s.game_id, SUM(s.end_elapsed - s.start_elapsed), SUM(s.points_for), SUM(s.points_against)
-            FROM stints s WHERE s.game_id IN ({placeholders}) AND {' AND '.join(conditions)}
-            GROUP BY s.game_id HAVING SUM(s.end_elapsed - s.start_elapsed) > 0""",
-        [*usable, *params]).fetchall()
-    return {game_id: {"minutes": seconds / 60, "plus_minus": scored - allowed,
-                      "points_for": scored, "points_against": allowed}
-            for game_id, seconds, scored, allowed in rows}
+    if clutch:
+        return pbp_query.event_values(conn, subject_type, subject_id, usable, True, with_ids, without_ids)
+    values = pbp_query.stint_values(conn, subject_type, subject_id, usable, with_ids, without_ids)
+    if set(stats) & set(PBP_BOX_STATS):
+        events = pbp_query.event_values(conn, subject_type, subject_id, list(values), False,
+                                        with_ids, without_ids)
+        for game_id, game in values.items():
+            counted = events.get(game_id, {})
+            game.update({stat: counted.get(stat, 0) for stat in EVENT_STATS})
+    return values
 
 
 def _check_stats(conn, stats, competition="euroleague"):

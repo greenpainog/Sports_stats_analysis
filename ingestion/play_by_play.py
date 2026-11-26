@@ -19,6 +19,31 @@ SUBSTITUTIONS = {"IN", "OUT"}
 # Markers with no clock or player: begin/end of a period and end of game.
 MARKERS = {"BP", "EP", "EG"}
 
+# Clutch time, the usual definition: the last 5 minutes of the 4th quarter
+# and of every overtime, while the score is within 5 points (before the event).
+CLUTCH_SECONDS_LEFT = 300
+CLUTCH_MARGIN = 5
+
+# How each box-score stat is counted from a player's events. Summed per game,
+# these match the box score in every player-game except a handful of fouls
+# and blocks the source corrected afterwards (checked 2026-11-26).
+FOULS = ("CM", "OF", "CMU", "CMT", "CMT1", "CMT2", "CMU_DI", "CMU_FL", "CMTI", "CMD")
+EVENT_STATS = {
+    "points": {"2FGM": 2, "3FGM": 3, "FTM": 1},
+    "fg2_made": {"2FGM": 1}, "fg2_attempted": {"2FGM": 1, "2FGA": 1},
+    "fg3_made": {"3FGM": 1}, "fg3_attempted": {"3FGM": 1, "3FGA": 1},
+    "ft_made": {"FTM": 1}, "ft_attempted": {"FTM": 1, "FTA": 1},
+    "offensive_rebounds": {"O": 1}, "defensive_rebounds": {"D": 1}, "total_rebounds": {"O": 1, "D": 1},
+    "assists": {"AS": 1}, "steals": {"ST": 1}, "turnovers": {"TO": 1},
+    "blocks": {"FV": 1}, "blocks_against": {"AG": 1},
+    "fouls_committed": {play_type: 1 for play_type in FOULS}, "fouls_received": {"RV": 1},
+}
+
+
+def is_clutch(period, elapsed, margin_before):
+    left = period_start(period) + period_length(period) - elapsed
+    return period >= 4 and left <= CLUTCH_SECONDS_LEFT and abs(margin_before) <= CLUTCH_MARGIN
+
 
 def _text(value):
     """The source pads codes with spaces ('PAN       ') and uses '' for none."""
@@ -104,6 +129,11 @@ def build_stints(events, starters, code_a, code_b):
     other event between them) are applied as one change, so a lineup can be
     six or four players for a moment without that counting as a stint.
     Points are credited to the lineups on the floor when they were scored.
+
+    Each event is also annotated in place: points_a / points_b (what each
+    team scored on it), clutch (see is_clutch) and stint_a / stint_b (the
+    stint dicts of the lineups on the floor when it happened, so a player's
+    events can be tied to who was on the floor with him).
     """
     lineups = {code: set(players) for code, players in starters.items()}
     other = {code_a: code_b, code_b: code_a}
@@ -132,7 +162,10 @@ def build_stints(events, starters, code_a, code_b):
 
     for event in events:
         code, play_type = event["team_code"], event["play_type"]
+        event["clutch"] = is_clutch(event["period"], event["elapsed"], score[code_a] - score[code_b])
+        event["points_a"] = event["points_b"] = 0
         if play_type in SUBSTITUTIONS:
+            event["stint_a"], event["stint_b"] = open_stints[code_a], open_stints[code_b]
             if code not in lineups or not event["player_code"]:
                 problems.append(f"substitution without team or player at {event['elapsed']}s")
                 continue
@@ -145,6 +178,9 @@ def build_stints(events, starters, code_a, code_b):
         if pending is not None:
             close_changed(pending)
             pending = None
+        event["stint_a"], event["stint_b"] = open_stints[code_a], open_stints[code_b]
+        for stint in (open_stints[code_a], open_stints[code_b]):
+            stint["events"] += 1
         if event["score_a"] is not None or event["score_b"] is not None:
             # Early in a game the source may fill in only the side that
             # scored (A None, B 2); the missing side hasn't changed.
@@ -154,6 +190,7 @@ def build_stints(events, starters, code_a, code_b):
                 gained = new[team] - score[team]
                 open_stints[team]["points_for"] += gained
                 open_stints[other[team]]["points_against"] += gained
+            event["points_a"], event["points_b"] = new[code_a] - score[code_a], new[code_b] - score[code_b]
             score = new
 
     end = max((e["elapsed"] for e in events), default=0)
@@ -166,13 +203,14 @@ def build_stints(events, starters, code_a, code_b):
 
 def _new_stint(code, players, start):
     return {"team_code": code, "start": start, "end": start,
-            "players": tuple(sorted(players)), "points_for": 0, "points_against": 0}
+            "players": tuple(sorted(players)), "points_for": 0, "points_against": 0, "events": 0}
 
 
 def _finish(stints, stint, end):
     stint["end"] = end
-    # A zero-length stint matters only if points were scored in it.
-    if stint["end"] > stint["start"] or stint["points_for"] or stint["points_against"]:
+    # A zero-length stint matters only if something happened in it (events
+    # point at it); one that only existed between two substitutions doesn't.
+    if stint["end"] > stint["start"] or stint["events"]:
         stints.append(stint)
 
 

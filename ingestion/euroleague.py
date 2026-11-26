@@ -656,20 +656,9 @@ def store_game_play_by_play(conn, game_id, data, home_code, away_code):
 
     for table in ("pbp_events", "stints", "pbp_checks"):
         conn.execute(f"DELETE FROM {table} WHERE game_id = ?", (game_id,))
-    home, away = 0, 0
-    rows = []
-    for sequence, event in enumerate(events):
-        home = home if event["score_a"] is None else event["score_a"]
-        away = away if event["score_b"] is None else event["score_b"]
-        rows.append((game_id, sequence, event["sequence"], event["period"], event["elapsed"],
-                     team_ids.get(event["team_code"]), player_ids.get(event["player_code"]),
-                     event["play_type"], home, away, event["info"]))
-    conn.executemany(
-        """INSERT INTO pbp_events (game_id, sequence, play_number, period, elapsed, team_id, player_id,
-                                   play_type, score_home, score_away, info)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
+    stint_ids = {}  # id(stint dict) -> stints.id
     for stint in stints:
-        stint_id = conn.execute(
+        stint_ids[id(stint)] = stint_id = conn.execute(
             """INSERT INTO stints (game_id, team_id, start_elapsed, end_elapsed, points_for, points_against)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (game_id, team_ids[stint["team_code"]], stint["start"], stint["end"],
@@ -679,6 +668,21 @@ def store_game_play_by_play(conn, game_id, data, home_code, away_code):
             problems.append(f"{stint['team_code']}: unknown player {', '.join(unknown)} on the floor")
         conn.executemany("INSERT OR IGNORE INTO stint_players (stint_id, player_id) VALUES (?, ?)",
                          [(stint_id, player_ids[code]) for code in stint["players"] if code in player_ids])
+    home, away = 0, 0
+    rows = []
+    for sequence, event in enumerate(events):
+        home = home if event["score_a"] is None else event["score_a"]
+        away = away if event["score_b"] is None else event["score_b"]
+        rows.append((game_id, sequence, event["sequence"], event["period"], event["elapsed"],
+                     team_ids.get(event["team_code"]), player_ids.get(event["player_code"]),
+                     event["play_type"], home, away, event["info"],
+                     event["points_a"], event["points_b"], int(event["clutch"]),
+                     stint_ids.get(id(event.get("stint_a"))), stint_ids.get(id(event.get("stint_b")))))
+    conn.executemany(
+        """INSERT INTO pbp_events (game_id, sequence, play_number, period, elapsed, team_id, player_id,
+                                   play_type, score_home, score_away, info,
+                                   home_points, away_points, clutch, home_stint_id, away_stint_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
     check = {"game_id": game_id, "events": len(events), "stints": len(stints),
              "minutes_max_diff": max_diff, "plus_minus_mismatches": mismatches,
              "problems": "; ".join(dict.fromkeys(problems)) or None}

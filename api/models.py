@@ -13,7 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 from analysis.player_rankings import RANKABLE_PLAYER_STATS
 from analysis.rankings import RANKABLE_TEAM_STATS
 from analysis.stat_query import (
-    COUNTING_STATS, MAX_ON_FLOOR_PLAYERS, PERCENTAGE_STATS, QUARTER_STATS, RESULT_STATS, STINT_ONLY_STATS,
+    COUNTING_STATS, MAX_ON_FLOOR_PLAYERS, PBP_BOX_STATS, PERCENTAGE_STATS, QUARTER_STATS, RESULT_STATS,
+    STINT_ONLY_STATS,
 )
 
 # Literal[...] from the tuples gives the JSON schema an exact list of allowed
@@ -73,8 +74,9 @@ class Filters(BaseModel):
         None, min_length=1, max_length=MAX_ON_FLOOR_PLAYERS,
         description="Teammates who must be ON THE FLOOR at the same time as the subject, e.g. ['Tavares'] for "
                     "'Campazzo's plus-minus when he's on the court with Tavares'. Only the time the lineup "
-                    "condition held counts. Stats can then be only minutes, plus_minus, points_for, "
-                    "points_against and win_pct. Euroleague and EuroCup only.",
+                    "condition held counts: minutes and plus_minus of that time, points_for/points_against "
+                    "(the team's points in it), box-score stats such as points, assists, total_rebounds or "
+                    "fg_pct (the subject's own in that time), and win_pct. Euroleague and EuroCup only.",
     )
     on_floor_without: Optional[list[str]] = Field(
         None, min_length=1, max_length=MAX_ON_FLOOR_PLAYERS,
@@ -115,6 +117,11 @@ class Filters(BaseModel):
     referee: Optional[str] = Field(
         None, description="Only games this person refereed, e.g. 'when Peruga referees'. Euroleague and "
                           "EuroCup only.")
+    clutch: bool = Field(
+        False, description="Only clutch time: the last 5 minutes of the 4th quarter or overtime with the score "
+                           "within 5 points. Stats are counted in that time (points, fg_pct, assists, "
+                           "turnovers, ...; plus_minus, points_for, points_against); minutes aren't available. "
+                           "Only games with clutch time count. Euroleague and EuroCup only.")
 
 
     @field_validator("seasons")
@@ -166,20 +173,26 @@ class QuerySpec(Filters):
             raise ValueError("Give exactly one of 'player' or 'team'.")
         if len(set(self.stats)) != len(self.stats):
             raise ValueError("Each stat may be listed only once.")
-        if self.player is not None and set(self.stats) & set(QUARTER_STATS):
-            raise ValueError("Quarter and half points (points_q1 ... points_second_half) are team stats only.")
         if (self.min_rest_hours is not None and self.max_rest_hours is not None
                 and self.min_rest_hours > self.max_rest_hours):
             raise ValueError("min_rest_hours cannot be more than max_rest_hours.")
         if self.season is not None and self.seasons is not None:
             raise ValueError("Give either season or seasons, not both.")
-        if self.on_floor_with or self.on_floor_without or set(self.stats) & set(STINT_ONLY_STATS):
-            allowed = {"minutes", "plus_minus", "win_pct", *STINT_ONLY_STATS}
-            if set(self.stats) - allowed:
-                raise ValueError("With on-floor filters (or points_for/points_against) the stats can only be "
-                                 "minutes, plus_minus, points_for, points_against and win_pct.")
-            if self.competition == "greek_league":
-                raise ValueError("On-floor stats are Euroleague and EuroCup only.")
+        pbp_mode = bool(self.on_floor_with or self.on_floor_without or self.clutch
+                        or set(self.stats) & set(STINT_ONLY_STATS))
+        if pbp_mode:
+            allowed = {*PBP_BOX_STATS, "plus_minus", "win_pct", *STINT_ONLY_STATS}
+            if not self.clutch:
+                allowed.add("minutes")
+            other = sorted(set(self.stats) - allowed)
+            if other:
+                raise ValueError(f"With clutch or on-floor filters these stats aren't available: {', '.join(other)} "
+                                 "(clutch time has no minutes; quarter points, shot-list and paint stats need "
+                                 "the box score).")
+        if (pbp_mode or (self.player is not None and set(self.stats) & set(QUARTER_STATS))) \
+                and self.competition == "greek_league":
+            raise ValueError("Clutch, on-floor and a player's quarter stats need play-by-play: Euroleague and "
+                             "EuroCup only.")
         if self.compare:
             self.side_specs()  # raises if a side is empty, repeated or invalid once merged
         return self

@@ -97,7 +97,7 @@ class OnFloorTests(unittest.TestCase):
 
     def test_mistakes_are_errors(self):
         cases = [
-            (dict(stats=["assists"], on_floor_with=["Sid Kick"]), "can report only"),
+            (dict(stats=["pir"], on_floor_with=["Sid Kick"]), "can't be asked"),
             (dict(stats=["plus_minus"], on_floor_with=["Olly Kick"]), "same team"),
             (dict(stats=["plus_minus"], on_floor_with=["Sam Shooter"]), "always on the floor"),
             (dict(stats=["plus_minus"], on_floor_with=["Sid Kick"], on_floor_without=["Sid Kick"]), "only once"),
@@ -110,7 +110,7 @@ class OnFloorTests(unittest.TestCase):
 
     def test_spec_validation_and_compare(self):
         with self.assertRaises(ValueError):
-            QuerySpec(stats=["assists"], player="Shooter", on_floor_with=["Kick"])
+            QuerySpec(stats=["pir"], player="Shooter", on_floor_with=["Kick"])
         with self.assertRaises(ValueError):
             QuerySpec(stats=["points_for"], player="Shooter", competition="greek_league")
         # points_for, not plus_minus: the shared (no on-floor filter) part of a compare reads

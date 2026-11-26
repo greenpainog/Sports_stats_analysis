@@ -19,6 +19,15 @@ GAMES_ADDED_COLUMNS = {
 }
 
 
+PBP_EVENTS_ADDED_COLUMNS = {
+    "home_points": "INTEGER NOT NULL DEFAULT 0",
+    "away_points": "INTEGER NOT NULL DEFAULT 0",
+    "clutch": "INTEGER NOT NULL DEFAULT 0",
+    "home_stint_id": "INTEGER REFERENCES stints(id)",
+    "away_stint_id": "INTEGER REFERENCES stints(id)",
+}
+
+
 def _add_missing_columns(cursor, table, columns):
     existing = {row[1] for row in cursor.execute(f"PRAGMA table_info({table})")}
     for name, column_type in columns.items():
@@ -236,6 +245,13 @@ def create_tables():
                 UNIQUE(game_id, sequence)
             )
         """)
+        # Added later: what each team scored on the event, whether it was in
+        # clutch time, and the two stints (lineups) on the floor when it happened.
+        _add_missing_columns(cursor, "pbp_events", PBP_EVENTS_ADDED_COLUMNS)
+        # Deleting a stint checks these references, so without the indexes a
+        # rebuild scans every event once per stint.
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_pbp_events_home_stint ON pbp_events(home_stint_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_pbp_events_away_stint ON pbp_events(away_stint_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS ix_pbp_events_player ON pbp_events(player_id, play_type)")
 
         # A stint: a stretch of one game in which one team had the same five

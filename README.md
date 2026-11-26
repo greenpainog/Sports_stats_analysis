@@ -278,7 +278,8 @@ python -m pytest
   - opponents over .500 *as of that game's date*
   - with, without or against a player (whole games)
   - teammates on the floor or on the bench at the same time ("Campazzo's +/- on the court with
-    Tavares"): minutes, plus-minus and points scored and allowed in that time, from play-by-play
+    Tavares"): minutes, plus-minus, the team's points and the player's own stats in that time
+  - clutch time: the last 5 minutes of the 4th quarter or overtime, within 5 points
   - a player's own minutes or points in that game ("when Lessort plays 30+ minutes")
   - days of rest
   - the team's coach ("Fenerbahce under Jasikevicius") or the game's referee
@@ -293,7 +294,7 @@ python -m pytest
 - **Shot-list stats:** paint points (worked out from shot coordinates), fast-break,
   second-chance and points off turnovers.
 - **Quarter and half points** for teams, scored or allowed ("4th quarter points",
-  "fewest first-half points allowed").
+  "fewest first-half points allowed"), and for players.
 
 Every endpoint, filter and stat is in [docs/REFERENCE.md](docs/REFERENCE.md).
 

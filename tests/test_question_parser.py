@@ -28,7 +28,7 @@ def test_league(tmp_path_factory):
 def llm_output(**fields):
     """An LLMQuerySpec with every field empty except the ones given."""
     base = {name: None for name in LLMQuerySpec.model_fields}
-    base.update(answerable=True, stats=[], opponent_over_500=False)
+    base.update(answerable=True, stats=[], opponent_over_500=False, clutch=False)
     base.update(fields)
     return LLMQuerySpec(**base)
 
@@ -36,7 +36,7 @@ def llm_output(**fields):
 def side(**fields):
     """An LLMCompareSide with every filter empty except the ones given."""
     base = {name: None for name in LLMCompareSide.model_fields}
-    base.update(opponent_over_500=False)
+    base.update(opponent_over_500=False, clutch=False)
     base.update(fields)
     return LLMCompareSide(**base)
 
@@ -171,7 +171,7 @@ def test_ask_compare(ask):
     assert body["status"] == "answered"
     assert [s["label"] for s in body["result"]["comparison"]] == ["without Kick", "with Kick"]
     assert body["spec"]["compare"][0] == {**{k: None for k in LLMCompareSide.model_fields},
-                                          "opponent_over_500": False, "label": "without Kick",
+                                          "opponent_over_500": False, "clutch": False, "label": "without Kick",
                                           "competition": "euroleague",  # unset by the LLM -> the default
                                           "without_player": "Sid Kick"}
 

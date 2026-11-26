@@ -154,7 +154,8 @@ shot-list stats. 10 more are missing one missed attempt, which only affects `pai
   - The header's quarter scores are running totals, so each quarter's own points are stored as
     `points` rows with period `q1`–`q4`; overtime is period `ot`, which the halves leave out.
   - Averages count only games with recorded quarter scores.
-  - A player's quarters need play-by-play, so they are refused for now.
+  - A player's quarter and half points are counted from his scoring events in the play-by-play
+    (every game with play-by-play counts, with 0 for a quarter he didn't score in).
 - **`coach`** keeps games where the subject's own team (a player's team in that game) was coached
   by that person.
 - **`referee`** keeps games that person refereed.
@@ -169,10 +170,12 @@ shot-list stats. 10 more are missing one missed attempt, which only affects `pai
 - **`on_floor_with`** lists teammates who must be on the floor at the same time as the subject;
   **`on_floor_without`** teammates who must be off it (on the bench or not playing). Up to 4 names.
   `with_player` / `without_player` stay whole games.
-- **Stats** can then only be `minutes`, `plus_minus`, `points_for` and `points_against` (the team's
-  points scored and allowed in that time) and `win_pct`. Each summary has the total, the average
-  over games with on-floor time, and `value` = per 40 minutes. `points_for` / `points_against`
-  without on-floor filters are the subject's own time on the floor.
+- **Stats:** `minutes`, `plus_minus`, `points_for` and `points_against` (the team's points scored
+  and allowed in that time) come from the stints; the subject's own box-score stats in that time
+  (points, shots and percentages, rebounds, assists, steals, turnovers, blocks, fouls) are counted
+  from the events. Each summary has the total, the average over games with on-floor time, and
+  `value` = per 40 minutes. `points_for` / `points_against` without on-floor filters are the
+  subject's own time on the floor.
 - **Which games:** the other filters (`last_n` too) choose the games first; then only games where
   the condition held for some time count. Games with no play-by-play yet, or whose substitutions
   don't add up to five players (`pbp_checks.problems`), are left out and listed in `notes`.
@@ -185,8 +188,19 @@ shot-list stats. 10 more are missing one missed attempt, which only affects `pai
  "compare": [{"label": "with Campazzo", "on_floor_with": ["Campazzo"]},
              {"label": "Campazzo on the bench", "on_floor_without": ["Campazzo"]}]}
 ```
-- Not yet: a player's own box-score stats (points, assists, shooting) while a teammate is on the
-  floor.
+
+**Clutch** (`"clutch": true`, Euroleague and EuroCup): the last 5 minutes of the 4th quarter and of
+every overtime, while the score is within 5 points (before each event). Stats are counted from the
+events in that time, plus `plus_minus`, `points_for` and `points_against`; clutch minutes aren't
+available. Only games with clutch time count (for a player, clutch time on the floor), so
+`win_pct` is the record in clutch games. It combines with every other filter, on-floor ones too.
+
+**Box-score stats from events.** Each event maps to a stat (`EVENT_STATS` in
+`ingestion/play_by_play.py`: `2FGM` = 2 points and a made 2, `FV` = block, `RV` = foul drawn, ...).
+Summed per game they match the box score in every player-game for 14 of the 17 stats; blocks,
+fouls and fouls drawn differ in 2-10 of 25,831 player-games, in games the source corrected later.
+Each event also stores the points each team scored on it, its clutch flag and the two stints on the
+floor at that moment (`home_stint_id`, `away_stint_id`).
 
 **Player rankings.** `POST /player-rankings` ranks players on 47 stats; `POST /player-profile`
 shows one player's value and rank in all of them (`{"player": "Nunn", "season": "2026-27"}`).
