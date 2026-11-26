@@ -9,6 +9,7 @@
     query_stats(["points"], player="Hifi", against_player="Theis",
                 seasons=["2025-26", "2026-27"])
     query_stats(["win_pct", "turnovers", "fg_pct"], team="Olympiacos", max_rest_hours=48)
+    query_stats(["minutes", "plus_minus"], player="Campazzo", on_floor_with=["Tavares"])
 
 Names are resolved through the alias tables. The SQL is always built here from
 these arguments, never written by a caller (later, never by the LLM). Filters
@@ -53,6 +54,16 @@ RESULT_STATS = ("win_pct",)
 # quarters need play-by-play.
 QUARTER_STATS = ("points_q1", "points_q2", "points_q3", "points_q4", "points_first_half", "points_second_half")
 HALVES = {"points_first_half": ("points_q1", "points_q2"), "points_second_half": ("points_q3", "points_q4")}
+
+
+# Stats of the time a lineup condition held, from the stints (see
+# ingestion/play_by_play.py): minutes on the floor, plus-minus, and the
+# team's points scored and allowed in that time. With on_floor_with /
+# on_floor_without only these (and win_pct) can be asked; points_for and
+# points_against always come from the stints. Euroleague and EuroCup only.
+ON_FLOOR_STATS = ("minutes", "plus_minus", "points_for", "points_against")
+STINT_ONLY_STATS = ("points_for", "points_against")
+MAX_ON_FLOOR_PLAYERS = 4
 
 
 def period_stat_name(stat_name, period):
@@ -139,7 +150,7 @@ class StatSummary:
     pct: float = None  # 0-100, None when there were no attempts
     wins: int = None  # win_pct only
     losses: int = None
-    value: float = None  # advanced stats (ratings, pace, ...), already rounded
+    value: float = None  # advanced stats (ratings, pace, ...), already rounded; on-floor: per 40 minutes
 
 
 @dataclass
@@ -149,23 +160,33 @@ class QueryResult:
     filters: dict
     games: list = field(default_factory=list)
     summary: dict = field(default_factory=dict)  # stat -> StatSummary
+    on_floor: bool = False  # minutes/plus-minus/points are of the on-floor time, from stints
+    notes: list = field(default_factory=list)  # e.g. games left out for broken play-by-play
 
     def describe(self):
         """One readable line per stat, e.g. 'fg3_pct: 7/18 = 38.9% over 5 games'."""
         conditions = ", ".join(f"{k}={v}" for k, v in self.filters.items()) or "all games"
+        notes = [f"  note: {note}" for note in self.notes]
         if not self.games:
-            return f"{self.subject}: no games match ({conditions})."
+            return "\n".join([f"{self.subject}: no games match ({conditions})."] + notes)
         count = len(self.games)
-        lines = [f"{self.subject} ({conditions}), {count} game{'s' if count != 1 else ''}:"]
+        lines = [f"{self.subject} ({conditions}), {count} game{'s' if count != 1 else ''}"
+                 f"{' with on-floor time' if self.on_floor else ''}:"]
         for s in self.summary.values():
-            if s.wins is not None:
+            if self.on_floor and s.stat == "minutes":
+                lines.append(f"  minutes on the floor: {s.total:g} total ({s.per_game:.1f} per game)")
+            elif self.on_floor and s.value is not None:
+                sign = "+" if s.stat == "plus_minus" else ""  # +5 for a margin, 81 for points
+                lines.append(f"  {s.stat}: {s.total:{sign}g} total ({s.per_game:{sign}.1f} per game, "
+                             f"{s.value:{sign}.1f} per 40 minutes)")
+            elif s.wins is not None:
                 lines.append(f"  {s.stat}: {s.wins}-{s.losses} = {s.pct:.1f}%")
             elif s.pct is not None or s.attempted is not None:
                 pct = "n/a" if s.pct is None else f"{s.pct:.1f}%"
                 lines.append(f"  {s.stat}: {s.made:g}/{s.attempted:g} = {pct}")
             else:
                 lines.append(f"  {s.stat}: {s.per_game:.1f} per game ({s.total:g} total)")
-        return "\n".join(lines)
+        return "\n".join(lines + notes)
 
 
 def _resolve(resolver, text, label):
@@ -236,6 +257,8 @@ def query_stats(
     player_threshold=None,
     coach=None,
     referee=None,
+    on_floor_with=None,
+    on_floor_without=None,
 ):
     """Return a QueryResult for one player or one team.
 
@@ -267,6 +290,13 @@ def query_stats(
         this player played and his `stat` in that game was at least `min`
         and/or at most `max` (both inclusive), e.g. Lessort, minutes, min 30.
         Games he missed never count, not even for "max".
+    on_floor_with / on_floor_without: lists of teammates who must be on the
+        floor / off the floor at the same time as the subject (a player
+        subject is on the floor himself). Stats then cover only that time,
+        from the stints: ON_FLOOR_STATS and win_pct. Games are first chosen
+        by the other filters (last_n too), and then only games where the
+        condition held for some time count. Games with broken substitution
+        data (pbp_checks.problems) are left out and listed in `notes`.
     """
     for name, hours in (("max_rest_hours", max_rest_hours), ("min_rest_hours", min_rest_hours)):
         if hours is not None and hours <= 0:
@@ -293,12 +323,27 @@ def query_stats(
         if low is not None and high is not None and low > high:
             raise QueryError("player_threshold min cannot be more than max.")
 
+    on_floor_with, on_floor_without = list(on_floor_with or []), list(on_floor_without or [])
+    on_floor = bool(on_floor_with or on_floor_without or set(stats) & set(STINT_ONLY_STATS))
+    if on_floor:
+        other = [s for s in stats if s not in ON_FLOOR_STATS + RESULT_STATS]
+        if other:
+            raise QueryError(
+                f"On-floor questions (who was on the court together) can report only {', '.join(ON_FLOOR_STATS)} "
+                f"and win_pct for now, not {', '.join(other)}.")
+        if competition == "greek_league":
+            raise QueryError("On-floor stats need play-by-play, which the Greek league data doesn't have.")
+        if len(on_floor_with) + len(on_floor_without) > MAX_ON_FLOOR_PLAYERS:
+            raise QueryError(f"Name at most {MAX_ON_FLOOR_PLAYERS} on-floor players.")
+
     conn = get_connection()
     try:
         competition_sql, competition_params = competition_where(competition)
         # A team's plus-minus is its point margin, taken from the final score
         # (the source only gives plus-minus for players), so it is never stored.
-        _check_stats(conn, [s for s in stats if not (team is not None and s == "plus_minus")], competition)
+        # On-floor stats come from the stints, not game_stats.
+        if not on_floor:
+            _check_stats(conn, [s for s in stats if not (team is not None and s == "plus_minus")], competition)
         if player is not None and set(stats) & set(QUARTER_STATS):
             raise QueryError("Quarter and half points are team stats only for now (a player's quarters need "
                              "play-by-play data, which isn't loaded).")
@@ -429,22 +474,110 @@ def query_stats(
             params.append(last_n)
 
         game_rows = conn.execute(sql, params).fetchall()
-        values = _load_values(conn, subject_type, subject_id, [row[0] for row in game_rows])
+        notes = []
+        if on_floor:
+            values = _on_floor_values(conn, subject_type, subject_id, [row[0] for row in game_rows],
+                                      on_floor_with, on_floor_without, filters, notes)
+            game_rows = [row for row in game_rows if row[0] in values]
+        else:
+            values = _load_values(conn, subject_type, subject_id, [row[0] for row in game_rows])
     finally:
         conn.close()
 
-    result = QueryResult(subject=subject, subject_type=subject_type, filters=filters)
+    result = QueryResult(subject=subject, subject_type=subject_type, filters=filters,
+                         on_floor=on_floor, notes=notes)
     for game_id, start_time, opp_name, game_venue, team_score, opp_score, rest, opp_rest in reversed(game_rows):
         # Basketball has no draws, so a game is either a win or a loss.
         values.setdefault(game_id, {})["win"] = 1 if team_score > opp_score else 0
-        if subject_type == "team":
+        if subject_type == "team" and not on_floor:
             values[game_id]["plus_minus"] = team_score - opp_score
         result.games.append(GameLine(
             game_id, start_time, opp_name, game_venue, team_score, opp_score, rest, opp_rest,
-            _game_values(stats, values[game_id]),
+            {k: round(v, 2) if on_floor and k == "minutes" else v
+             for k, v in _game_values(stats, values[game_id]).items()},
         ))
     result.summary = {stat: _summarise(stat, values, [g.game_id for g in result.games]) for stat in stats}
+    if on_floor:
+        minutes = sum(values[g.game_id]["minutes"] for g in result.games)
+        for stat, summary in result.summary.items():
+            if stat in ON_FLOOR_STATS and stat != "minutes" and minutes:
+                summary.value = round(summary.total / minutes * 40, 1)
+            if summary.total is not None:
+                summary.total = round(summary.total, 2)
     return result
+
+
+def _on_floor_values(conn, subject_type, subject_id, game_ids, with_names, without_names, filters, notes):
+    """{game_id: {minutes, plus_minus, points_for, points_against}} of the on-floor time.
+
+    Only games where the condition held for more than 0 seconds are returned.
+    Names are resolved here and written into `filters`; games left out
+    because their play-by-play is missing or broken are explained in `notes`.
+    """
+    with_ids, without_ids = [], []
+    for names, ids, key in ((with_names, with_ids, "on_floor_with"),
+                            (without_names, without_ids, "on_floor_without")):
+        shown = []
+        for name in names:
+            player_id, player_name = _resolve(lambda t: resolve_player(t, conn), name, "player")
+            ids.append(player_id)
+            shown.append(player_name)
+        if shown:
+            filters[key] = ", ".join(shown)
+    named = with_ids + without_ids
+    if len(set(named)) != len(named):
+        raise QueryError("Each on-floor player may be named only once (not both on and off the floor).")
+    if subject_type == "player" and subject_id in named:
+        raise QueryError("The player asked about is always on the floor in his own on-floor stats; "
+                         "name only his teammates.")
+    if not game_ids:
+        return {}
+
+    placeholders = ", ".join("?" for _ in game_ids)
+    checked = dict(conn.execute(
+        f"SELECT game_id, problems FROM pbp_checks WHERE game_id IN ({placeholders})", game_ids).fetchall())
+    missing = [g for g in game_ids if g not in checked]
+    broken = [g for g in game_ids if checked.get(g)]
+    if missing:
+        notes.append(f"{len(missing)} matching game(s) have no play-by-play yet and are left out.")
+    if broken:
+        notes.append(f"{len(broken)} game(s) left out: the source's substitutions there don't add up to "
+                     "five players on the floor.")
+    usable = [g for g in game_ids if g in checked and not checked[g]]
+    if not usable:
+        return {}
+    placeholders = ", ".join("?" for _ in usable)
+
+    # Each named player must be the subject's teammate in at least one of the
+    # games; otherwise "without him" would be true of every stint.
+    for player_id, name in zip(named, list(with_names) + list(without_names)):
+        if subject_type == "player":
+            sql = f"""SELECT COUNT(*) FROM game_appearances o JOIN game_appearances me
+                        ON me.game_id = o.game_id AND me.team_id = o.team_id
+                      WHERE me.player_id = ? AND o.player_id = ? AND o.game_id IN ({placeholders})"""
+        else:
+            sql = f"""SELECT COUNT(*) FROM game_appearances o
+                      WHERE o.team_id = ? AND o.player_id = ? AND o.game_id IN ({placeholders})"""
+        if not conn.execute(sql, [subject_id, player_id, *usable]).fetchone()[0]:
+            raise QueryError(f"'{name}' wasn't on the same team as the subject in any of these games.")
+
+    if subject_type == "player":
+        conditions = ["EXISTS (SELECT 1 FROM stint_players me WHERE me.stint_id = s.id AND me.player_id = ?)"]
+    else:
+        conditions = ["s.team_id = ?"]
+    params = [subject_id]
+    for ids, sign in ((with_ids, "EXISTS"), (without_ids, "NOT EXISTS")):
+        for player_id in ids:
+            conditions.append(f"{sign} (SELECT 1 FROM stint_players o WHERE o.stint_id = s.id AND o.player_id = ?)")
+            params.append(player_id)
+    rows = conn.execute(
+        f"""SELECT s.game_id, SUM(s.end_elapsed - s.start_elapsed), SUM(s.points_for), SUM(s.points_against)
+            FROM stints s WHERE s.game_id IN ({placeholders}) AND {' AND '.join(conditions)}
+            GROUP BY s.game_id HAVING SUM(s.end_elapsed - s.start_elapsed) > 0""",
+        [*usable, *params]).fetchall()
+    return {game_id: {"minutes": seconds / 60, "plus_minus": scored - allowed,
+                      "points_for": scored, "points_against": allowed}
+            for game_id, seconds, scored, allowed in rows}
 
 
 def _check_stats(conn, stats, competition="euroleague"):

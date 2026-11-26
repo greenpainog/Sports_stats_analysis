@@ -103,7 +103,8 @@ def gold_value(fact):
 # --- Does the answer state it? ---------------------------------------------------
 
 def has_number(answer, value, tolerance=0.05):
-    return value is not None and any(abs(v - value) <= tolerance + 1e-9 for v in numbers(answer))
+    # numbers() reads digits without a sign ("-18" and "minus 18" both give 18), so compare sizes.
+    return value is not None and any(abs(v - abs(value)) <= tolerance + 1e-9 for v in numbers(answer))
 
 
 def name_forms(kind, name):
@@ -192,6 +193,8 @@ def main(argv=None):
     parser.add_argument("--only", help="Comma-separated question ids.")
     parser.add_argument("--check-gold", action="store_true", help="Run the reference queries only (no LLM).")
     args = parser.parse_args(argv)
+    # Answers can hold characters like '−'; a redirected Windows console can't encode them.
+    sys.stdout.reconfigure(encoding="utf-8")
 
     questions = load_questions(args.file)
     if args.only:

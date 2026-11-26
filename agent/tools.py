@@ -162,7 +162,9 @@ class Tool:
 TOOLS = {tool.name: tool for tool in (
     Tool("query_stats", QuerySpec, query_stats,
          "One player's or one team's stats over matching games, with filters: opponent, venue, last_n, "
-         "opponent_over_500, with/without/against a player, player_threshold, rest, season(s), phase, "
+         "opponent_over_500, with/without/against a player (whole games), on_floor_with/on_floor_without "
+         "(teammates on the court / on the bench at the same time: stats only minutes, plus_minus, points_for, "
+         "points_against, win_pct), player_threshold, rest, season(s), phase, "
          "competition, coach (the subject's own team's coach), referee, and compare: 2-4 sides, each with a label and at least one filter that differs "
          "(e.g. [{label: 'season', season: '2026-27'}, {label: 'last 6', last_n: 6}]). Top-level "
          "filters apply to EVERY side, so never put the filter that differs (like last_n) at the top level. "

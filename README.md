@@ -276,7 +276,9 @@ python -m pytest
 - **Filters:**
   - opponent; home, away or neutral; last N games
   - opponents over .500 *as of that game's date*
-  - with, without or against a player
+  - with, without or against a player (whole games)
+  - teammates on the floor or on the bench at the same time ("Campazzo's +/- on the court with
+    Tavares"): minutes, plus-minus and points scored and allowed in that time, from play-by-play
   - a player's own minutes or points in that game ("when Lessort plays 30+ minutes")
   - days of rest
   - the team's coach ("Fenerbahce under Jasikevicius") or the game's referee

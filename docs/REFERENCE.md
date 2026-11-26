@@ -165,6 +165,29 @@ shot-list stats. 10 more are missing one missed attempt, which only affects `pai
 - **Reloading from the cache:** `python -m ingestion.euroleague --season 2026 --cached-only`
   reloads a season from `data/raw/` without any request (e.g. after a loader change).
 
+**On-floor filters** (Euroleague and EuroCup, from the stints described under Database):
+- **`on_floor_with`** lists teammates who must be on the floor at the same time as the subject;
+  **`on_floor_without`** teammates who must be off it (on the bench or not playing). Up to 4 names.
+  `with_player` / `without_player` stay whole games.
+- **Stats** can then only be `minutes`, `plus_minus`, `points_for` and `points_against` (the team's
+  points scored and allowed in that time) and `win_pct`. Each summary has the total, the average
+  over games with on-floor time, and `value` = per 40 minutes. `points_for` / `points_against`
+  without on-floor filters are the subject's own time on the floor.
+- **Which games:** the other filters (`last_n` too) choose the games first; then only games where
+  the condition held for some time count. Games with no play-by-play yet, or whose substitutions
+  don't add up to five players (`pbp_checks.problems`), are left out and listed in `notes`.
+- A named player who never played for the subject's team in those games is an error, so "without
+  him" can't silently mean every minute.
+- A compare covers "with X vs without X but with Y" in one spec:
+
+```json
+{"stats": ["minutes", "plus_minus"], "player": "Tavares", "season": "2026-27",
+ "compare": [{"label": "with Campazzo", "on_floor_with": ["Campazzo"]},
+             {"label": "Campazzo on the bench", "on_floor_without": ["Campazzo"]}]}
+```
+- Not yet: a player's own box-score stats (points, assists, shooting) while a teammate is on the
+  floor.
+
 **Player rankings.** `POST /player-rankings` ranks players on 47 stats; `POST /player-profile`
 shows one player's value and rank in all of them (`{"player": "Nunn", "season": "2026-27"}`).
 - Traditional: every box-score stat plus fg2/fg3/ft/fg %, win_pct; `per` is `game`, `total` or `per40`.
