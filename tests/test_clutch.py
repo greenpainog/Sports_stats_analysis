@@ -99,7 +99,7 @@ class EventQueryTests(unittest.TestCase):
     def test_what_clutch_cannot_answer(self):
         with self.assertRaises(QueryError) as caught:
             query_stats(["minutes"], player="Shooter", clutch=True)
-        self.assertIn("Minutes played in clutch time", str(caught.exception))
+        self.assertIn("Minutes, possessions and ratings in clutch time", str(caught.exception))
         with self.assertRaises(QueryError):
             query_stats(["points"], player="Shooter", clutch=True, competition="greek_league")
         with self.assertRaises(ValueError):

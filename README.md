@@ -278,7 +278,8 @@ python -m pytest
   - opponents over .500 *as of that game's date*
   - with, without or against a player (whole games)
   - teammates on the floor or on the bench at the same time ("Campazzo's +/- on the court with
-    Tavares"): minutes, plus-minus, the team's points and the player's own stats in that time
+    Tavares"): minutes, plus-minus, net/offensive/defensive rating per 100 possessions, the team's
+    points and the player's own stats in that time
   - clutch time: the last 5 minutes of the 4th quarter or overtime, within 5 points
   - a player's own minutes or points in that game ("when Lessort plays 30+ minutes")
   - days of rest
@@ -292,7 +293,7 @@ python -m pytest
 - **Comparisons:** 2-4 sides in one question ("with X vs without X", "this season vs last").
 - **Rankings:** every team or player ranked on a stat; where one team or player ranks; two teams
   side by side; a player's rank in all 47 player stats.
-- **Lineups:** a team's best duos, trios or 5-man lineups by plus-minus per 40 minutes together
+- **Lineups:** a team's best duos, trios or 5-man lineups by net rating per 100 possessions together
   ("Panathinaikos' best duo", "most used lineup", "best trio with Campazzo"). No minutes cutoff:
   groups under 40 minutes together are listed and flagged as small samples.
 - **Advanced stats:**

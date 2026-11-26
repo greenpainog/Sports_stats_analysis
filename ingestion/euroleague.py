@@ -18,7 +18,7 @@ import requests
 
 from database.db import get_connection
 from database.repositories import save_game_bundle
-from ingestion.play_by_play import build_stints, compare_with_box, parse_events
+from ingestion.play_by_play import POSSESSION_WEIGHTS, build_stints, compare_with_box, parse_events
 
 SOURCE = "euroleague"
 BASE_URL = "https://live.euroleague.net/api"
@@ -641,6 +641,47 @@ def _box_for_stints(conn, game_id):
     return starters, box, player_ids
 
 
+def update_stint_possessions(conn, game_ids=None):
+    """Fill stints.own_possessions / opponent_possessions from the events (no commit).
+
+    game_ids: only these games; None = every stint still missing them. Each
+    event lies in one home and one away stint; it counts for the stint's own
+    team when the event is that team's, otherwise for the opponent. Returns
+    the number of stints updated.
+    """
+    if game_ids is None:
+        target = "own_possessions IS NULL"
+        params = []
+    else:
+        if not game_ids:
+            return 0
+        target = f"game_id IN ({', '.join('?' for _ in game_ids)})"
+        params = list(game_ids)
+    stint_ids = [row[0] for row in conn.execute(f"SELECT id FROM stints WHERE {target}", params)]
+    if not stint_ids:
+        return 0
+    weight = "CASE e.play_type " + " ".join(
+        f"WHEN '{play_type}' THEN {value}" for play_type, value in POSSESSION_WEIGHTS.items()) + " ELSE 0 END"
+    # Stints with no possession events stay at 0, not NULL.
+    conn.execute(f"UPDATE stints SET own_possessions = 0, opponent_possessions = 0 WHERE {target}", params)
+    for start in range(0, len(stint_ids), 900):  # SQLite caps the number of ? per statement
+        chunk = stint_ids[start:start + 900]
+        placeholders = ", ".join("?" for _ in chunk)
+        rows = conn.execute(
+            f"""SELECT s.id,
+                       SUM(CASE WHEN e.team_id = s.team_id THEN {weight} ELSE 0 END),
+                       SUM(CASE WHEN e.team_id <> s.team_id THEN {weight} ELSE 0 END)
+                FROM stints s
+                JOIN (SELECT home_stint_id AS stint_id, team_id, play_type FROM pbp_events
+                      UNION ALL
+                      SELECT away_stint_id, team_id, play_type FROM pbp_events) e ON e.stint_id = s.id
+                WHERE s.id IN ({placeholders}) AND e.team_id IS NOT NULL
+                GROUP BY s.id""", chunk).fetchall()
+        conn.executemany("UPDATE stints SET own_possessions = ?, opponent_possessions = ? WHERE id = ?",
+                         [(own, opp, stint_id) for stint_id, own, opp in rows])
+    return len(stint_ids)
+
+
 def store_game_play_by_play(conn, game_id, data, home_code, away_code):
     """Save one game's events, stints and their box-score check (no commit).
 
@@ -683,6 +724,7 @@ def store_game_play_by_play(conn, game_id, data, home_code, away_code):
                                    play_type, score_home, score_away, info,
                                    home_points, away_points, clutch, home_stint_id, away_stint_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
+    update_stint_possessions(conn, [game_id])
     check = {"game_id": game_id, "events": len(events), "stints": len(stints),
              "minutes_max_diff": max_diff, "plus_minus_mismatches": mismatches,
              "problems": "; ".join(dict.fromkeys(problems)) or None}
@@ -713,6 +755,11 @@ def store_play_by_play(conn, rebuild=False, verbose=True):
         data = json.loads(path.read_text(encoding="utf-8"))
         checks.append(store_game_play_by_play(conn, game_id, data, home_code, away_code))
         conn.commit()
+    # Stints stored before possessions were added get them here, once.
+    filled = update_stint_possessions(conn)
+    conn.commit()
+    if verbose and filled:
+        print(f"Counted possessions for {filled} older stints.")
     if verbose:
         exact = sum(1 for c in checks if c["plus_minus_mismatches"] == 0)
         print(f"Stored play-by-play for {len(checks)} games; plus-minus matches the box score "

@@ -179,7 +179,7 @@ TOOLS = {tool.name: tool for tool in (
          "One player's or one team's stats over matching games, with filters: opponent, venue, last_n, "
          "opponent_over_500, with/without/against a player (whole games), on_floor_with/on_floor_without "
          "(teammates on the court / on the bench at the same time: minutes, plus_minus, points_for, "
-         "points_against and the subject's box-score stats in that time), clutch (last 5 minutes of the 4th quarter/OT, "
+         "points_against, possessions, off/def/net_rating per 100 possessions and the subject's box-score stats in that time), clutch (last 5 minutes of the 4th quarter/OT, "
          "score within 5), player_threshold, rest, season(s), phase, "
          "competition, coach (the subject's own team's coach), referee, and compare: 2-4 sides, each with a label and at least one filter that differs "
          "(e.g. [{label: 'season', season: '2026-27'}, {label: 'last 6', last_n: 6}]). Top-level "
@@ -197,8 +197,8 @@ TOOLS = {tool.name: tool for tool in (
          "One player's value and league rank in every player stat."),
     Tool("lineup_rankings", LineupSpec, lineup_rankings,
          "A team's duos (size 2), trios (3) or 5-man lineups ranked by how they did on the floor together: "
-         "plus-minus per 40 minutes by default ('best duo', 'net rating'), or sort by minutes ('most used'), "
-         "points_for_per_40 or points_against_per_40. with_players keeps only groups with those players "
+         "net rating per 100 possessions by default ('best duo', 'net rating'), or sort by off_rating, def_rating "
+         "(order lowest = best defense), net_per_40, plus_minus or minutes ('most used'). with_players keeps only groups with those players "
          "('best duo with X'). No minutes cutoff: groups under 40 minutes together are marked SMALL SAMPLE."),
     Tool("resolve_name", ResolveNameArgs, resolve_name,
          "Check what a team or player name refers to, or list candidates when it is ambiguous."),

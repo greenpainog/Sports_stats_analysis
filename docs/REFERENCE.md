@@ -171,7 +171,9 @@ shot-list stats. 10 more are missing one missed attempt, which only affects `pai
   **`on_floor_without`** teammates who must be off it (on the bench or not playing). Up to 4 names.
   `with_player` / `without_player` stay whole games.
 - **Stats:** `minutes`, `plus_minus`, `points_for` and `points_against` (the team's points scored
-  and allowed in that time) come from the stints; the subject's own box-score stats in that time
+  and allowed in that time), `possessions` (its per-40 value is the pace) and `off_rating`,
+  `def_rating`, `net_rating` (points per 100 possessions, from summed points over summed
+  possessions) come from the stints; ratings aren't available in clutch time; the subject's own box-score stats in that time
   (points, shots and percentages, rebounds, assists, steals, turnovers, blocks, fouls) are counted
   from the events. Each summary has the total, the average over games with on-floor time, and
   `value` = per 40 minutes. `points_for` / `points_against` without on-floor filters are the
@@ -199,13 +201,18 @@ available. Only games with clutch time count (for a player, clutch time on the f
 groups or 5-man lineups, ranked by how they did on the floor together (`analysis/lineups.py`).
 - A group is on the floor together in every stint that holds all its players, so its minutes,
   points scored and allowed are sums over those stints.
-- `sort`: `net_per_40` (default: plus-minus per 40 minutes together), `plus_minus`, `minutes`
-  ("most used"), `points_for_per_40` or `points_against_per_40` (with `order: "lowest"` for the
-  best defense). `with_players` keeps only groups that include those players ("best duo with X").
+- `sort`: `net_rating` (default: points scored minus allowed per 100 possessions together),
+  `off_rating`, `def_rating` (with `order: "lowest"` for the best defense), `net_per_40`
+  (plus-minus per 40 minutes), `plus_minus`, `minutes` ("most used"), `points_for_per_40` or
+  `points_against_per_40`. `with_players` keeps only groups that include those players ("best duo with X").
 - **No minimum-minutes cutoff.** Every group that shared the floor is listed. Groups under 40
   minutes together are flagged `small_sample` (`[SMALL SAMPLE ...]` in the text): a +4 in 3
   minutes is +53 per 40 and says little.
-- "Net per 40" is plus-minus per 40 minutes, not a per-100-possessions net rating.
+- **Possessions** per stint are estimated from its events with the team formula
+  (FGA - OREB + TOV + 0.44 * FTA, both teams averaged; `stints.own_possessions` and
+  `opponent_possessions`). Summed over a game they equal the box-score estimate in all 2,390
+  team-games, so a team's event-based ratings match `/rankings`. Net per 40 favours fast-paced
+  groups (more possessions per minute); net rating doesn't.
 - Filters: `season` or `seasons`, `phase`, `last_n` (the team's last N games). Games with broken
   substitutions are left out and listed in `notes`.
 

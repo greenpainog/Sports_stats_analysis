@@ -68,7 +68,9 @@ HALVES = {"points_first_half": ("points_q1", "points_q2"), "points_second_half":
 # - clutch: only events in clutch time; the same stats except minutes.
 # points_for / points_against (the team's points while the subject was on the
 # floor) exist only here.
-STINT_ONLY_STATS = ("points_for", "points_against")
+STINT_ONLY_STATS = ("points_for", "points_against", "possessions", "off_rating", "def_rating", "net_rating")
+# Stats only known from the stints, so not in clutch time (which is counted from events alone).
+NOT_IN_CLUTCH = ("minutes", "possessions", "off_rating", "def_rating", "net_rating")
 PBP_BOX_STATS = tuple(EVENT_STATS) + EVENT_PERCENTAGES
 MAX_ON_FLOOR_PLAYERS = 4
 
@@ -180,7 +182,10 @@ class QueryResult:
         count = len(self.games)
         lines = [f"{self.subject} ({conditions}), {count} game{'s' if count != 1 else ''}{self.scope}:"]
         for s in self.summary.values():
-            if self.on_floor and s.stat == "minutes":
+            if s.stat in pbp_query.RATING_STATS:
+                shown = "n/a" if s.value is None else f"{s.value:{'+' if s.stat == 'net_rating' else ''}.1f}"
+                lines.append(f"  {s.stat}: {shown} per 100 possessions")
+            elif self.on_floor and s.stat == "minutes":
                 lines.append(f"  minutes on the floor: {s.total:g} total ({s.per_game:.1f} per game)")
             elif self.on_floor and s.value is not None:
                 sign = "+" if s.stat == "plus_minus" else ""  # +5 for a margin, 81 for points
@@ -348,13 +353,13 @@ def query_stats(
         raise QueryError("This needs play-by-play (clutch time, who was on the floor, a player's quarters), "
                          "which the Greek league data doesn't have.")
     if pbp_mode:
-        allowed = set(PBP_BOX_STATS) | {"plus_minus", "win_pct", *STINT_ONLY_STATS}
-        if not clutch:
-            allowed.add("minutes")
+        allowed = set(PBP_BOX_STATS) | {"plus_minus", "win_pct", "minutes", *STINT_ONLY_STATS}
+        if clutch:
+            allowed -= set(NOT_IN_CLUTCH)
         other = [s for s in stats if s not in allowed]
-        if clutch and "minutes" in other:
-            raise QueryError("Minutes played in clutch time aren't available; clutch stats count events "
-                             "(points, shots, rebounds, assists, ...) and the plus-minus.")
+        if clutch and set(other) & set(NOT_IN_CLUTCH):
+            raise QueryError("Minutes, possessions and ratings in clutch time aren't available; clutch stats "
+                             "count events (points, shots, rebounds, assists, ...) and the plus-minus.")
         if other:
             raise QueryError(f"{', '.join(other)} can't be asked with clutch or on-floor filters; available: "
                              f"{', '.join(sorted(allowed))}.")
@@ -526,6 +531,15 @@ def query_stats(
              for k, v in _game_values(stats, values[game_id]).items()},
         ))
     result.summary = {stat: _summarise(stat, values, [g.game_id for g in result.games]) for stat in stats}
+    if set(stats) & set(pbp_query.RATING_STATS):
+        sums = {k: sum(values[g.game_id][k] for g in result.games)
+                for k in ("points_for", "points_against", "possessions")}
+        rated = pbp_query.ratings(sums["points_for"], sums["points_against"], sums["possessions"])
+        for stat in pbp_query.RATING_STATS:
+            if stat in result.summary:
+                value = rated[stat]
+                result.summary[stat] = StatSummary(stat, len(result.games),
+                                                   value=None if value is None else round(value, 1))
     if on_floor:
         minutes = sum(values[g.game_id]["minutes"] for g in result.games)
         for stat, summary in result.summary.items():
