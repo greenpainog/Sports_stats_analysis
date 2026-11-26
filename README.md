@@ -284,6 +284,9 @@ python -m pytest
   - days of rest
   - the team's coach ("Fenerbahce under Jasikevicius") or the game's referee
   - season, several seasons, regular season or playoffs
+- **Season:** a question that names no season or time span means this season, rankings too.
+  "Last 10 games", "career", "all-time" or "last 3 seasons" go wider. (`POST /query` and
+  `POST /rankings` take the spec as given: no `season` there means every loaded season.)
 - **Comparisons:** 2-4 sides in one question ("with X vs without X", "this season vs last").
 - **Rankings:** every team or player ranked on a stat; where one team or player ranks; two teams
   side by side; a player's rank in all 47 player stats.
