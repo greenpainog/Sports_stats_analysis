@@ -9,9 +9,11 @@ Run once a day (Windows Task Scheduler, see the README). Steps:
 3. Euroleague, then EuroCup (same API): download the season's game list
    again if it is older than 20 hours, then load finished games that aren't
    saved yet.
-4. Greek league: re-read the round pages (only stale ones are downloaded)
+4. Play-by-play: fetch it for Euroleague/EuroCup games that don't have it
+   yet, then store their events and stints (see ingestion/play_by_play.py).
+5. Greek league: re-read the round pages (only stale ones are downloaded)
    and load finished games that aren't saved yet.
-5. Write a log to data/logs/update-<date>.log, including new Greek players
+6. Write a log to data/logs/update-<date>.log, including new Greek players
    that may be the same person as a Euroleague player (to review by hand).
 
 Exit code 0 = all fine, 1 = some games failed, 2 = another run holds the lock.
@@ -98,6 +100,24 @@ def update_euroleague(season_start, competition="E"):
     return len(report["failed"])
 
 
+def update_play_by_play():
+    conn = db.get_connection()
+    try:
+        failures = euroleague.fetch_play_by_play(conn, verbose=False)
+        checks = euroleague.store_play_by_play(conn, verbose=False)
+    finally:
+        conn.close()
+    log.info("Play-by-play: stored %d game(s)", len(checks))
+    for check in checks:
+        if check["plus_minus_mismatches"] or check["problems"]:
+            log.warning("  game id %s: stints differ from the box score (%d plus-minus mismatch(es), "
+                        "minutes up to %ss off) %s", check["game_id"], check["plus_minus_mismatches"],
+                        check["minutes_max_diff"], check["problems"] or "")
+    for source_game_id, error in failures:
+        log.error("  FAILED play-by-play %s: %s", source_game_id, error)
+    return len(failures)
+
+
 def update_greek_league(season_name):
     if season_name not in esake.CHAMPIONSHIPS:
         log.error("Greek league %s: no championship id in esake.CHAMPIONSHIPS; add it "
@@ -129,6 +149,7 @@ def run(today=None):
     failures = 0
     steps = (("Euroleague", update_euroleague, (season_start, "E")),
              ("EuroCup", update_euroleague, (season_start, "U")),
+             ("Play-by-play", update_play_by_play, ()),
              ("Greek league", update_greek_league, (season_name,)))
     for number, (name, step, args) in enumerate(steps):
         if number == len(steps) - 1:

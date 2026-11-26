@@ -31,6 +31,7 @@ def _run(spec: QuerySpec) -> QueryResponse:
         filters=result.filters,
         games=[asdict(game) for game in result.games],
         summary={stat: asdict(summary) for stat, summary in result.summary.items()},
+        notes=result.notes,
         answer=result.describe(),
     )
 
@@ -43,6 +44,11 @@ def _value(s):
         return f"{s.wins}-{s.losses} ({s.pct:.1f}%)"
     if s.attempted is not None:
         return "no attempts" if s.pct is None else f"{s.pct:.1f}% ({s.made:g}/{s.attempted:g})"
+    if s.value is not None and s.total is not None:  # on-floor: the total and per 40 minutes say more
+        sign = "+" if s.stat == "plus_minus" else ""
+        return f"{s.total:{sign}g} total ({s.value:{sign}.1f} per 40 min)"
+    if s.stat == "minutes":
+        return f"{s.per_game:.1f} per game ({s.total:g} total)"
     return f"{s.per_game:.1f} per game"
 
 
@@ -52,6 +58,7 @@ def comparison_text(base: QueryResponse, sides: list[ComparisonSide]) -> str:
     for side in sides:
         count = len(side.result.games)
         lines.append(f"  {side.label}: {count} game{'s' if count != 1 else ''}")
+        lines += [f"    note: {note}" for note in side.result.notes]
     for stat in base.summary:
         parts = [f"{side.label} {_value(side.result.summary[stat])}" for side in sides]
         lines.append(f"  {stat}: " + " | ".join(parts))

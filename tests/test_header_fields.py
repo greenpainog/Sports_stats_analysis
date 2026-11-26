@@ -53,9 +53,10 @@ def test_quarter_points_are_ranked_and_allowed():
     assert allowed["Alpha"] == 15  # Beta 15 in g2, Gamma 15 in g3
 
 
-def test_quarter_points_are_team_only():
-    with pytest.raises(QueryError, match="team stats only"):
-        query_stats(["points_q1"], player="Sam Shooter")
+def test_player_quarters_come_from_play_by_play_not_the_team_header():
+    # A player's quarters are counted from his events (tests/test_clutch.py); this league
+    # has none, so no game has them, and the team's header quarters are never used for him.
+    assert query_stats(["points_q1"], player="Sam Shooter").summary["points_q1"].games == 0
 
 
 def test_coach_filter_uses_the_subjects_own_team():

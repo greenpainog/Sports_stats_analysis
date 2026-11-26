@@ -16,7 +16,9 @@ from pathlib import Path
 
 import requests
 
+from database.db import get_connection
 from database.repositories import save_game_bundle
+from ingestion.play_by_play import build_stints, compare_with_box, parse_events
 
 SOURCE = "euroleague"
 BASE_URL = "https://live.euroleague.net/api"
@@ -151,7 +153,7 @@ def _cached_get(path, url, params=None, download=True, max_age_hours=None):
 
 
 def fetch_json(kind, competition, season, gamecode, download=True):
-    """Return one game's "Header", "Boxscore" or "Points" (shot list) JSON."""
+    """Return one game's "Header", "Boxscore", "Points" (shot list) or "PlaybyPlay" JSON."""
     return _cached_get(
         RAW_DIR / f"{kind.lower()}_{competition}{season}_{gamecode}.json",
         f"{BASE_URL}/{kind}",
@@ -584,14 +586,163 @@ def ingest_season(competition, season, verbose=True, download=True, notes=None):
     return failures
 
 
+def fetch_play_by_play(conn, competitions=("E", "U"), verbose=True):
+    """Cache the play-by-play of every loaded game that doesn't have it yet.
+
+    Only fetches and saves the raw JSON under data/raw/ (once per game, at least
+    SECONDS_BETWEEN_REQUESTS apart); nothing is written to the database.
+    Returns [(source_game_id, error)] for games that failed.
+    """
+    rows = conn.execute(
+        f"""SELECT source_game_id FROM games WHERE source = ? AND status = 'finished'
+            AND substr(source_game_id, 1, 1) IN ({', '.join('?' for _ in competitions)})
+            ORDER BY source_game_id""", (SOURCE, *competitions)).fetchall()
+    games = []
+    for (source_game_id,) in rows:  # 'E2024-17'
+        season_code, gamecode = source_game_id.split("-")
+        games.append((source_game_id, season_code[0], int(season_code[1:]), int(gamecode)))
+    missing = [g for g in games if not (RAW_DIR / f"playbyplay_{g[1]}{g[2]}_{g[3]}.json").exists()]
+    if verbose:
+        print(f"{len(games)} games, {len(games) - len(missing)} already cached, {len(missing)} to fetch "
+              f"(~{len(missing) * SECONDS_BETWEEN_REQUESTS / 60:.0f} min).", flush=True)
+    failures = []
+    for number, (source_game_id, competition, season, gamecode) in enumerate(missing, start=1):
+        try:
+            fetch_json("PlaybyPlay", competition, season, gamecode)
+        except Exception as exc:  # keep going; report at the end
+            failures.append((source_game_id, f"{type(exc).__name__}: {exc}"))
+        if verbose and (number % 50 == 0 or number == len(missing)):
+            print(f"[{number}/{len(missing)}] {len(failures)} failed so far", flush=True)
+    for source_game_id, message in failures:
+        print(f"  {source_game_id}: {message}")
+    return failures
+
+
+def _box_for_stints(conn, game_id):
+    """Starters, box-score (seconds, plus-minus) and code->id maps for one game."""
+    starters, box, player_ids = {}, {}, {}
+    stats = {(player_id, name): (raw, value) for player_id, name, raw, value in conn.execute(
+        """SELECT player_id, stat_name, raw_value, stat_value FROM game_stats
+           WHERE game_id = ? AND entity_type = 'player' AND period = 'match'
+             AND stat_name IN ('minutes', 'plus_minus')""", (game_id,))}
+    for team_code, player_code, player_id, started in conn.execute(
+            """SELECT t.source_team_id, p.source_player_id, a.player_id, a.started
+               FROM game_appearances a JOIN players p ON p.id = a.player_id
+               JOIN teams t ON t.id = a.team_id WHERE a.game_id = ?""", (game_id,)):
+        player_ids[player_code] = player_id
+        if started:
+            starters.setdefault(team_code, set()).add(player_code)
+        raw_minutes = stats.get((player_id, "minutes"), (None, None))[0]
+        seconds = None
+        if raw_minutes and ":" in raw_minutes:
+            minutes, secs = raw_minutes.split(":")
+            seconds = int(minutes) * 60 + int(secs)
+        box[(team_code, player_code)] = (seconds, stats.get((player_id, "plus_minus"), (None, None))[1])
+    return starters, box, player_ids
+
+
+def store_game_play_by_play(conn, game_id, data, home_code, away_code):
+    """Save one game's events, stints and their box-score check (no commit).
+
+    Replaces whatever was stored for the game before, so it can be re-run
+    after a change to the stint builder. Returns the pbp_checks row as a dict.
+    """
+    starters, box, player_ids = _box_for_stints(conn, game_id)
+    team_ids = {home_code: conn.execute("SELECT home_team_id FROM games WHERE id = ?", (game_id,)).fetchone()[0],
+                away_code: conn.execute("SELECT away_team_id FROM games WHERE id = ?", (game_id,)).fetchone()[0]}
+    events = parse_events(data, player_code=_player_code)
+    stints, problems = build_stints(events, starters, home_code, away_code)
+    max_diff, mismatches = compare_with_box(stints, box)
+
+    for table in ("pbp_events", "stints", "pbp_checks"):
+        conn.execute(f"DELETE FROM {table} WHERE game_id = ?", (game_id,))
+    stint_ids = {}  # id(stint dict) -> stints.id
+    for stint in stints:
+        stint_ids[id(stint)] = stint_id = conn.execute(
+            """INSERT INTO stints (game_id, team_id, start_elapsed, end_elapsed, points_for, points_against)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (game_id, team_ids[stint["team_code"]], stint["start"], stint["end"],
+             stint["points_for"], stint["points_against"])).lastrowid
+        unknown = [code for code in stint["players"] if code not in player_ids]
+        if unknown:
+            problems.append(f"{stint['team_code']}: unknown player {', '.join(unknown)} on the floor")
+        conn.executemany("INSERT OR IGNORE INTO stint_players (stint_id, player_id) VALUES (?, ?)",
+                         [(stint_id, player_ids[code]) for code in stint["players"] if code in player_ids])
+    home, away = 0, 0
+    rows = []
+    for sequence, event in enumerate(events):
+        home = home if event["score_a"] is None else event["score_a"]
+        away = away if event["score_b"] is None else event["score_b"]
+        rows.append((game_id, sequence, event["sequence"], event["period"], event["elapsed"],
+                     team_ids.get(event["team_code"]), player_ids.get(event["player_code"]),
+                     event["play_type"], home, away, event["info"],
+                     event["points_a"], event["points_b"], int(event["clutch"]),
+                     stint_ids.get(id(event.get("stint_a"))), stint_ids.get(id(event.get("stint_b")))))
+    conn.executemany(
+        """INSERT INTO pbp_events (game_id, sequence, play_number, period, elapsed, team_id, player_id,
+                                   play_type, score_home, score_away, info,
+                                   home_points, away_points, clutch, home_stint_id, away_stint_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
+    check = {"game_id": game_id, "events": len(events), "stints": len(stints),
+             "minutes_max_diff": max_diff, "plus_minus_mismatches": mismatches,
+             "problems": "; ".join(dict.fromkeys(problems)) or None}
+    conn.execute(
+        """INSERT INTO pbp_checks (game_id, events, stints, minutes_max_diff, plus_minus_mismatches, problems)
+           VALUES (:game_id, :events, :stints, :minutes_max_diff, :plus_minus_mismatches, :problems)""", check)
+    return check
+
+
+def store_play_by_play(conn, rebuild=False, verbose=True):
+    """Store events and stints for every game with a cached play-by-play file.
+
+    Games already in pbp_checks are skipped unless `rebuild`. Reads only
+    data/raw/ (no requests). Returns the list of pbp_checks rows written.
+    """
+    rows = conn.execute(
+        """SELECT g.id, g.source_game_id, th.source_team_id, ta.source_team_id
+           FROM games g JOIN teams th ON th.id = g.home_team_id JOIN teams ta ON ta.id = g.away_team_id
+           WHERE g.source = ? AND g.status = 'finished'
+             AND (? OR g.id NOT IN (SELECT game_id FROM pbp_checks))
+           ORDER BY g.source_game_id""", (SOURCE, int(rebuild))).fetchall()
+    checks = []
+    for game_id, source_game_id, home_code, away_code in rows:
+        season_code, gamecode = source_game_id.split("-")
+        path = RAW_DIR / f"playbyplay_{season_code}_{gamecode}.json"
+        if not path.exists():
+            continue
+        data = json.loads(path.read_text(encoding="utf-8"))
+        checks.append(store_game_play_by_play(conn, game_id, data, home_code, away_code))
+        conn.commit()
+    if verbose:
+        exact = sum(1 for c in checks if c["plus_minus_mismatches"] == 0)
+        print(f"Stored play-by-play for {len(checks)} games; plus-minus matches the box score "
+              f"exactly in {exact}.")
+    return checks
+
+
 def main():
     parser = argparse.ArgumentParser(description="Load Euroleague/EuroCup games.")
     parser.add_argument("--competition", choices=sorted(COMPETITION_NAMES), default="E")
-    parser.add_argument("--season", type=int, required=True, help="Start year, e.g. 2024")
+    parser.add_argument("--season", type=int, help="Start year, e.g. 2024 (needed unless --play-by-play)")
     parser.add_argument("--game", type=int, help="Game code; omit to load the whole season")
     parser.add_argument("--cached-only", action="store_true",
                         help="Reload from data/raw/ without any request (e.g. after a loader change)")
+    parser.add_argument("--play-by-play", action="store_true",
+                        help="Fetch the play-by-play of every loaded Euroleague/EuroCup game that lacks it, "
+                             "then store its events and stints")
+    parser.add_argument("--rebuild-stints", action="store_true",
+                        help="With --play-by-play: rebuild events and stints of all games from data/raw/")
     args = parser.parse_args()
+    if args.play_by_play:
+        conn = get_connection()
+        try:
+            failures = [] if args.cached_only else fetch_play_by_play(conn)
+            store_play_by_play(conn, rebuild=args.rebuild_stints)
+            raise SystemExit(1 if failures else 0)
+        finally:
+            conn.close()
+    if args.season is None:
+        parser.error("--season is required")
     download = not args.cached_only
     if args.game is None:
         failures = ingest_season(args.competition, args.season, download=download)

@@ -15,6 +15,10 @@ python analysis_runner.py --list-stats
 python -m ingestion.euroleague --season 2024 --game 1
 python -m ingestion.euroleague --season 2024    # whole season (~11 min the first time)
 
+# Play-by-play: fetch it for loaded games that lack it, then store events and stints
+python -m ingestion.euroleague --play-by-play
+python -m ingestion.euroleague --play-by-play --cached-only --rebuild-stints   # rebuild from data/raw/
+
 # Run the tests
 python -m pytest
 
@@ -150,7 +154,8 @@ shot-list stats. 10 more are missing one missed attempt, which only affects `pai
   - The header's quarter scores are running totals, so each quarter's own points are stored as
     `points` rows with period `q1`–`q4`; overtime is period `ot`, which the halves leave out.
   - Averages count only games with recorded quarter scores.
-  - A player's quarters need play-by-play, so they are refused for now.
+  - A player's quarter and half points are counted from his scoring events in the play-by-play
+    (every game with play-by-play counts, with 0 for a quarter he didn't score in).
 - **`coach`** keeps games where the subject's own team (a player's team in that game) was coached
   by that person.
 - **`referee`** keeps games that person refereed.
@@ -160,6 +165,42 @@ shot-list stats. 10 more are missing one missed attempt, which only affects `pai
 - **The agent's `team_roster` tool** names each season's head coach.
 - **Reloading from the cache:** `python -m ingestion.euroleague --season 2026 --cached-only`
   reloads a season from `data/raw/` without any request (e.g. after a loader change).
+
+**On-floor filters** (Euroleague and EuroCup, from the stints described under Database):
+- **`on_floor_with`** lists teammates who must be on the floor at the same time as the subject;
+  **`on_floor_without`** teammates who must be off it (on the bench or not playing). Up to 4 names.
+  `with_player` / `without_player` stay whole games.
+- **Stats:** `minutes`, `plus_minus`, `points_for` and `points_against` (the team's points scored
+  and allowed in that time) come from the stints; the subject's own box-score stats in that time
+  (points, shots and percentages, rebounds, assists, steals, turnovers, blocks, fouls) are counted
+  from the events. Each summary has the total, the average over games with on-floor time, and
+  `value` = per 40 minutes. `points_for` / `points_against` without on-floor filters are the
+  subject's own time on the floor.
+- **Which games:** the other filters (`last_n` too) choose the games first; then only games where
+  the condition held for some time count. Games with no play-by-play yet, or whose substitutions
+  don't add up to five players (`pbp_checks.problems`), are left out and listed in `notes`.
+- A named player who never played for the subject's team in those games is an error, so "without
+  him" can't silently mean every minute.
+- A compare covers "with X vs without X but with Y" in one spec:
+
+```json
+{"stats": ["minutes", "plus_minus"], "player": "Tavares", "season": "2026-27",
+ "compare": [{"label": "with Campazzo", "on_floor_with": ["Campazzo"]},
+             {"label": "Campazzo on the bench", "on_floor_without": ["Campazzo"]}]}
+```
+
+**Clutch** (`"clutch": true`, Euroleague and EuroCup): the last 5 minutes of the 4th quarter and of
+every overtime, while the score is within 5 points (before each event). Stats are counted from the
+events in that time, plus `plus_minus`, `points_for` and `points_against`; clutch minutes aren't
+available. Only games with clutch time count (for a player, clutch time on the floor), so
+`win_pct` is the record in clutch games. It combines with every other filter, on-floor ones too.
+
+**Box-score stats from events.** Each event maps to a stat (`EVENT_STATS` in
+`ingestion/play_by_play.py`: `2FGM` = 2 points and a made 2, `FV` = block, `RV` = foul drawn, ...).
+Summed per game they match the box score in every player-game for 14 of the 17 stats; blocks,
+fouls and fouls drawn differ in 2-10 of 25,831 player-games, in games the source corrected later.
+Each event also stores the points each team scored on it, its clutch flag and the two stints on the
+floor at that moment (`home_stint_id`, `away_stint_id`).
 
 **Player rankings.** `POST /player-rankings` ranks players on 47 stats; `POST /player-profile`
 shows one player's value and rank in all of them (`{"player": "Nunn", "season": "2026-27"}`).
@@ -211,6 +252,26 @@ coaches (with their team) and referees.
 `database.repositories.save_game_bundle()` saves one game with all of its stats in a single
 transaction, and re-saving the same game updates rows instead of duplicating them.
 The older `matches` / `team_match_stats` tables remain so the current CLI keeps working.
+
+**Play-by-play and stints** (Euroleague and EuroCup). `pbp_events` has every event of a game in
+the source's order, with seconds since tip-off (`elapsed`) and the running score. A *stint* is a
+stretch in which one team had the same five players on the floor: `stints` has its start, end
+and points for and against, and `stint_players` its five players. The source has no lineups, only
+substitutions, so `ingestion/play_by_play.py` starts from the box-score starters and applies each
+substitution in order. Things learned from the data:
+- the file's order is the truth: sorting by `NUMBEROFPLAY` gives more mismatches, not fewer;
+- a stint ends at the substitution's clock time, not at the next event's;
+- all overtimes share one list, and the subs for the next overtime come before its begin marker;
+- the clock sometimes steps back a second, so a stint is never allowed to end before it starts;
+- early in a game the source may give only the scoring side's score.
+
+`pbp_checks` compares each game's stints with its box score. Over all 1,195 games (2026-11-26):
+team points from stints = final score in every game, and team time = game length in every game;
+player plus-minus matches the box score exactly in 1,138 games (25,669 of 25,831 player-games);
+minutes match to the second in 1,013 games and within 30 s in 1,135. The rest are source errors
+(a substitution logged for the wrong player, a 63-minute player, 4 listed starters); 14 games have
+a lineup that isn't five players for a while. Answers built on stints should use `pbp_checks` to
+leave such games out or say so.
 
 **One player, two leagues.** `source_links` sends another source's ID to an existing row, so
 Kendrick Nunn is one player with both his Euroleague and Greek league games. The Greek loader

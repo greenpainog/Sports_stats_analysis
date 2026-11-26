@@ -12,11 +12,14 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 
 from analysis.player_rankings import RANKABLE_PLAYER_STATS
 from analysis.rankings import RANKABLE_TEAM_STATS
-from analysis.stat_query import COUNTING_STATS, PERCENTAGE_STATS, QUARTER_STATS, RESULT_STATS
+from analysis.stat_query import (
+    COUNTING_STATS, MAX_ON_FLOOR_PLAYERS, PBP_BOX_STATS, PERCENTAGE_STATS, QUARTER_STATS, RESULT_STATS,
+    STINT_ONLY_STATS,
+)
 
 # Literal[...] from the tuples gives the JSON schema an exact list of allowed
 # values, so an unknown stat name is rejected before any SQL runs.
-StatName = Literal[COUNTING_STATS + QUARTER_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS]
+StatName = Literal[COUNTING_STATS + QUARTER_STATS + tuple(PERCENTAGE_STATS) + RESULT_STATS + STINT_ONLY_STATS]
 CountingStatName = Literal[COUNTING_STATS]
 Venue = Literal["home", "away", "neutral"]
 Competition = Literal["euroleague", "eurocup", "greek_league"]
@@ -61,11 +64,24 @@ class Filters(BaseModel):
     without_player: Optional[str] = Field(
         None,
         description="Only games this player missed, in seasons when he played for either team. Whole games, "
-                    "not the minutes he sat on the bench.",
+                    "not the minutes he sat on the bench (that is on_floor_without).",
     )
     with_player: Optional[str] = Field(
         None, description="Only games in which this player appeared (for either team). Whole games, not the "
-                          "minutes both were on the floor: on-floor combinations are not in the data."
+                          "minutes both were on the floor (that is on_floor_with)."
+    )
+    on_floor_with: Optional[list[str]] = Field(
+        None, min_length=1, max_length=MAX_ON_FLOOR_PLAYERS,
+        description="Teammates who must be ON THE FLOOR at the same time as the subject, e.g. ['Tavares'] for "
+                    "'Campazzo's plus-minus when he's on the court with Tavares'. Only the time the lineup "
+                    "condition held counts: minutes and plus_minus of that time, points_for/points_against "
+                    "(the team's points in it), box-score stats such as points, assists, total_rebounds or "
+                    "fg_pct (the subject's own in that time), and win_pct. Euroleague and EuroCup only.",
+    )
+    on_floor_without: Optional[list[str]] = Field(
+        None, min_length=1, max_length=MAX_ON_FLOOR_PLAYERS,
+        description="Teammates who must be OFF THE FLOOR (on the bench or not playing) while the subject is "
+                    "on it, e.g. 'with Tavares on the bench'. Same stats as on_floor_with.",
     )
     against_player: Optional[str] = Field(
         None, description="Only games in which this player played for the opponent, e.g. 'against Theis'."
@@ -101,6 +117,11 @@ class Filters(BaseModel):
     referee: Optional[str] = Field(
         None, description="Only games this person refereed, e.g. 'when Peruga referees'. Euroleague and "
                           "EuroCup only.")
+    clutch: bool = Field(
+        False, description="Only clutch time: the last 5 minutes of the 4th quarter or overtime with the score "
+                           "within 5 points. Stats are counted in that time (points, fg_pct, assists, "
+                           "turnovers, ...; plus_minus, points_for, points_against); minutes aren't available. "
+                           "Only games with clutch time count. Euroleague and EuroCup only.")
 
 
     @field_validator("seasons")
@@ -131,7 +152,9 @@ class QuerySpec(Filters):
         min_length=1, max_length=8,
         description=(
             "Stats to report. Percentages (fg3_pct, ...) are computed from makes and attempts; "
-            "win_pct is the win-loss record of the subject's team in the matching games."
+            "win_pct is the win-loss record of the subject's team in the matching games. "
+            "points_for / points_against: the team's points scored / allowed while the subject (and any "
+            "on-floor condition) was on the floor."
         ),
     )
     player: Optional[str] = Field(None, description="Player name, e.g. 'Kendrick Nunn' or 'Nunn'.")
@@ -150,13 +173,26 @@ class QuerySpec(Filters):
             raise ValueError("Give exactly one of 'player' or 'team'.")
         if len(set(self.stats)) != len(self.stats):
             raise ValueError("Each stat may be listed only once.")
-        if self.player is not None and set(self.stats) & set(QUARTER_STATS):
-            raise ValueError("Quarter and half points (points_q1 ... points_second_half) are team stats only.")
         if (self.min_rest_hours is not None and self.max_rest_hours is not None
                 and self.min_rest_hours > self.max_rest_hours):
             raise ValueError("min_rest_hours cannot be more than max_rest_hours.")
         if self.season is not None and self.seasons is not None:
             raise ValueError("Give either season or seasons, not both.")
+        pbp_mode = bool(self.on_floor_with or self.on_floor_without or self.clutch
+                        or set(self.stats) & set(STINT_ONLY_STATS))
+        if pbp_mode:
+            allowed = {*PBP_BOX_STATS, "plus_minus", "win_pct", *STINT_ONLY_STATS}
+            if not self.clutch:
+                allowed.add("minutes")
+            other = sorted(set(self.stats) - allowed)
+            if other:
+                raise ValueError(f"With clutch or on-floor filters these stats aren't available: {', '.join(other)} "
+                                 "(clutch time has no minutes; quarter points, shot-list and paint stats need "
+                                 "the box score).")
+        if (pbp_mode or (self.player is not None and set(self.stats) & set(QUARTER_STATS))) \
+                and self.competition == "greek_league":
+            raise ValueError("Clutch, on-floor and a player's quarter stats need play-by-play: Euroleague and "
+                             "EuroCup only.")
         if self.compare:
             self.side_specs()  # raises if a side is empty, repeated or invalid once merged
         return self
@@ -220,7 +256,8 @@ class StatSummary(BaseModel):
     pct: Optional[float] = None
     wins: Optional[int] = None
     losses: Optional[int] = None
-    value: Optional[float] = Field(None, description="Advanced stats only (off_rating, pace, ...).")
+    value: Optional[float] = Field(
+        None, description="Advanced stats (off_rating, pace, ...); for on-floor stats, the value per 40 minutes.")
 
 
 class QueryResponse(BaseModel):
@@ -229,6 +266,7 @@ class QueryResponse(BaseModel):
     filters: dict
     games: list[GameRow]
     summary: dict[str, StatSummary]
+    notes: list[str] = Field([], description="E.g. games left out because their play-by-play is broken.")
     answer: str = Field(description="Readable summary of the result.")
     comparison: Optional[list["ComparisonSide"]] = Field(
         None, description="With QuerySpec.compare: the result for each side. The fields above cover all sides' shared filters."
