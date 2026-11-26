@@ -128,12 +128,21 @@ def team_roster(args: TeamRosterArgs) -> str:
             (team_id, args.season, COMPETITIONS[args.competition]),
         ).fetchone()[0]
         rows = conn.execute(ROSTER_SQL, (team_id, args.season, COMPETITIONS[args.competition])).fetchall()
+        coaches = conn.execute(
+            """SELECT st.name, COUNT(*) FROM game_staff st JOIN games g ON g.id = st.game_id
+               JOIN seasons s ON s.id = g.season_id JOIN competitions c ON c.id = s.competition_id
+               WHERE st.role = 'coach' AND st.team_id = ? AND s.name = ? AND c.source_competition_id = ?
+               GROUP BY st.normalized ORDER BY MIN(g.start_time)""",
+            (team_id, args.season, COMPETITIONS[args.competition]),
+        ).fetchall()
     finally:
         conn.close()
     if not rows:
         return f"{team_name} has no players in {args.competition} {args.season}."
-    lines = [f"{team_name}, {args.competition} {args.season}: {team_games} games played. "
-             "Players (games, starts, minutes per game):"]
+    lines = [f"{team_name}, {args.competition} {args.season}: {team_games} games played."]
+    if coaches:
+        lines.append("Head coach: " + ", ".join(f"{name} ({games} games)" for name, games in coaches))
+    lines.append("Players (games, starts, minutes per game):")
     for name, games, starts, minutes in rows:
         shown = "-" if minutes is None else f"{minutes:.1f}"
         lines.append(f"  {name}: {games} games, {starts or 0} starts, {shown} min")
@@ -154,12 +163,13 @@ TOOLS = {tool.name: tool for tool in (
     Tool("query_stats", QuerySpec, query_stats,
          "One player's or one team's stats over matching games, with filters: opponent, venue, last_n, "
          "opponent_over_500, with/without/against a player, player_threshold, rest, season(s), phase, "
-         "competition, and compare: 2-4 sides, each with a label and at least one filter that differs "
+         "competition, coach (the subject's own team's coach), referee, and compare: 2-4 sides, each with a label and at least one filter that differs "
          "(e.g. [{label: 'season', season: '2026-27'}, {label: 'last 6', last_n: 6}]). Top-level "
          "filters apply to EVERY side, so never put the filter that differs (like last_n) at the top level. "
          "The main tool."),
     Tool("team_rankings", TeamRankingsArgs, team_rankings,
-         "Rank every team on stats (also advanced ones like off_rating, pace, forced_turnovers). "
+         "Rank every team on stats (also advanced ones like off_rating, pace, forced_turnovers, and "
+         "quarter/half points like points_q4, points_first_half). "
          "side='opponent' for what teams allowed. Set team to point out one team's rank."),
     Tool("matchup", MatchupSpec, matchup,
          "Two teams side by side with their value and league rank for each stat."),
@@ -170,7 +180,7 @@ TOOLS = {tool.name: tool for tool in (
     Tool("resolve_name", ResolveNameArgs, resolve_name,
          "Check what a team or player name refers to, or list candidates when it is ambiguous."),
     Tool("team_roster", TeamRosterArgs, team_roster,
-         "Who played for a team in a season, with games, starts and minutes per game."),
+         "Who played for and coached a team in a season, with games, starts and minutes per game."),
 )}
 
 

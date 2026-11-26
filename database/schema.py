@@ -192,6 +192,25 @@ def create_tables():
 
         _add_missing_columns(cursor, "games", GAMES_ADDED_COLUMNS)
 
+        # Coaches and referees of each game, from the Euroleague/EuroCup header.
+        # A coach has the team they coached; a referee has team_id NULL.
+        # `normalized` is the name as normalize_name() writes it, for lookups.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS game_staff (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id INTEGER NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('coach', 'referee')),
+                team_id INTEGER,
+                name TEXT NOT NULL,
+                normalized TEXT NOT NULL,
+                FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+                FOREIGN KEY (team_id) REFERENCES teams(id),
+                CHECK((role = 'coach') = (team_id IS NOT NULL)),
+                UNIQUE(game_id, role, normalized)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_game_staff_lookup ON game_staff(role, normalized)")
+
         # Every known name for a team or player, for resolving user questions.
         # `normalized` is lowercase without accents or punctuation (see
         # database/aliases.py). One alias may belong to several entities,
