@@ -211,6 +211,80 @@ def create_tables():
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS ix_game_staff_lookup ON game_staff(role, normalized)")
 
+        # Play-by-play (Euroleague/EuroCup), see ingestion/play_by_play.py.
+        # One row per event in the source's order (`sequence`); `elapsed` is
+        # seconds since tip-off. score_home/score_away is the running score
+        # after the event, filled on every row. player_id is NULL for team
+        # events and for the rare source ID that matches no box-score player.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pbp_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id INTEGER NOT NULL,
+                sequence INTEGER NOT NULL,
+                play_number INTEGER,
+                period INTEGER NOT NULL,
+                elapsed INTEGER NOT NULL,
+                team_id INTEGER,
+                player_id INTEGER,
+                play_type TEXT NOT NULL,
+                score_home INTEGER NOT NULL,
+                score_away INTEGER NOT NULL,
+                info TEXT,
+                FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+                FOREIGN KEY (team_id) REFERENCES teams(id),
+                FOREIGN KEY (player_id) REFERENCES players(id),
+                UNIQUE(game_id, sequence)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_pbp_events_player ON pbp_events(player_id, play_type)")
+
+        # A stint: a stretch of one game in which one team had the same five
+        # players on the floor (start/end in elapsed seconds). Its players are
+        # in stint_players.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS stints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id INTEGER NOT NULL,
+                team_id INTEGER NOT NULL,
+                start_elapsed INTEGER NOT NULL,
+                end_elapsed INTEGER NOT NULL,
+                points_for INTEGER NOT NULL,
+                points_against INTEGER NOT NULL,
+                FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+                FOREIGN KEY (team_id) REFERENCES teams(id),
+                CHECK(end_elapsed >= start_elapsed)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_stints_game ON stints(game_id, team_id)")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS stint_players (
+                stint_id INTEGER NOT NULL,
+                player_id INTEGER NOT NULL,
+                FOREIGN KEY (stint_id) REFERENCES stints(id) ON DELETE CASCADE,
+                FOREIGN KEY (player_id) REFERENCES players(id),
+                PRIMARY KEY (stint_id, player_id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS ix_stint_players_player ON stint_players(player_id, stint_id)")
+
+        # How well each game's stints agree with its box score, so answers
+        # can leave out (or warn about) games where the source's
+        # substitutions are wrong. minutes_max_diff: the largest gap, in
+        # seconds, between a player's stint time and box-score minutes.
+        # plus_minus_mismatches: players whose stint plus-minus differs from
+        # the box score's. problems: lineups that weren't five players.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pbp_checks (
+                game_id INTEGER PRIMARY KEY,
+                events INTEGER NOT NULL,
+                stints INTEGER NOT NULL,
+                minutes_max_diff INTEGER,
+                plus_minus_mismatches INTEGER NOT NULL,
+                problems TEXT,
+                FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+            )
+        """)
+
         # Every known name for a team or player, for resolving user questions.
         # `normalized` is lowercase without accents or punctuation (see
         # database/aliases.py). One alias may belong to several entities,

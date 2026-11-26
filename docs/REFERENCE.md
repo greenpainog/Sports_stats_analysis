@@ -15,6 +15,10 @@ python analysis_runner.py --list-stats
 python -m ingestion.euroleague --season 2024 --game 1
 python -m ingestion.euroleague --season 2024    # whole season (~11 min the first time)
 
+# Play-by-play: fetch it for loaded games that lack it, then store events and stints
+python -m ingestion.euroleague --play-by-play
+python -m ingestion.euroleague --play-by-play --cached-only --rebuild-stints   # rebuild from data/raw/
+
 # Run the tests
 python -m pytest
 
@@ -211,6 +215,26 @@ coaches (with their team) and referees.
 `database.repositories.save_game_bundle()` saves one game with all of its stats in a single
 transaction, and re-saving the same game updates rows instead of duplicating them.
 The older `matches` / `team_match_stats` tables remain so the current CLI keeps working.
+
+**Play-by-play and stints** (Euroleague and EuroCup). `pbp_events` has every event of a game in
+the source's order, with seconds since tip-off (`elapsed`) and the running score. A *stint* is a
+stretch in which one team had the same five players on the floor: `stints` has its start, end
+and points for and against, and `stint_players` its five players. The source has no lineups, only
+substitutions, so `ingestion/play_by_play.py` starts from the box-score starters and applies each
+substitution in order. Things learned from the data:
+- the file's order is the truth: sorting by `NUMBEROFPLAY` gives more mismatches, not fewer;
+- a stint ends at the substitution's clock time, not at the next event's;
+- all overtimes share one list, and the subs for the next overtime come before its begin marker;
+- the clock sometimes steps back a second, so a stint is never allowed to end before it starts;
+- early in a game the source may give only the scoring side's score.
+
+`pbp_checks` compares each game's stints with its box score. Over all 1,195 games (2026-11-26):
+team points from stints = final score in every game, and team time = game length in every game;
+player plus-minus matches the box score exactly in 1,138 games (25,669 of 25,831 player-games);
+minutes match to the second in 1,013 games and within 30 s in 1,135. The rest are source errors
+(a substitution logged for the wrong player, a 63-minute player, 4 listed starters); 14 games have
+a lineup that isn't five players for a while. Answers built on stints should use `pbp_checks` to
+leave such games out or say so.
 
 **One player, two leagues.** `source_links` sends another source's ID to an existing row, so
 Kendrick Nunn is one player with both his Euroleague and Greek league games. The Greek loader
