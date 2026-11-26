@@ -16,6 +16,7 @@ from pathlib import Path
 
 import requests
 
+from database.db import get_connection
 from database.repositories import save_game_bundle
 
 SOURCE = "euroleague"
@@ -151,7 +152,7 @@ def _cached_get(path, url, params=None, download=True, max_age_hours=None):
 
 
 def fetch_json(kind, competition, season, gamecode, download=True):
-    """Return one game's "Header", "Boxscore" or "Points" (shot list) JSON."""
+    """Return one game's "Header", "Boxscore", "Points" (shot list) or "PlaybyPlay" JSON."""
     return _cached_get(
         RAW_DIR / f"{kind.lower()}_{competition}{season}_{gamecode}.json",
         f"{BASE_URL}/{kind}",
@@ -584,14 +585,56 @@ def ingest_season(competition, season, verbose=True, download=True, notes=None):
     return failures
 
 
+def fetch_play_by_play(conn, competitions=("E", "U"), verbose=True):
+    """Cache the play-by-play of every loaded game that doesn't have it yet.
+
+    Only fetches and saves the raw JSON under data/raw/ (once per game, at least
+    SECONDS_BETWEEN_REQUESTS apart); nothing is written to the database.
+    Returns [(source_game_id, error)] for games that failed.
+    """
+    rows = conn.execute(
+        f"""SELECT source_game_id FROM games WHERE source = ? AND status = 'finished'
+            AND substr(source_game_id, 1, 1) IN ({', '.join('?' for _ in competitions)})
+            ORDER BY source_game_id""", (SOURCE, *competitions)).fetchall()
+    games = []
+    for (source_game_id,) in rows:  # 'E2024-17'
+        season_code, gamecode = source_game_id.split("-")
+        games.append((source_game_id, season_code[0], int(season_code[1:]), int(gamecode)))
+    missing = [g for g in games if not (RAW_DIR / f"playbyplay_{g[1]}{g[2]}_{g[3]}.json").exists()]
+    if verbose:
+        print(f"{len(games)} games, {len(games) - len(missing)} already cached, {len(missing)} to fetch "
+              f"(~{len(missing) * SECONDS_BETWEEN_REQUESTS / 60:.0f} min).", flush=True)
+    failures = []
+    for number, (source_game_id, competition, season, gamecode) in enumerate(missing, start=1):
+        try:
+            fetch_json("PlaybyPlay", competition, season, gamecode)
+        except Exception as exc:  # keep going; report at the end
+            failures.append((source_game_id, f"{type(exc).__name__}: {exc}"))
+        if verbose and (number % 50 == 0 or number == len(missing)):
+            print(f"[{number}/{len(missing)}] {len(failures)} failed so far", flush=True)
+    for source_game_id, message in failures:
+        print(f"  {source_game_id}: {message}")
+    return failures
+
+
 def main():
     parser = argparse.ArgumentParser(description="Load Euroleague/EuroCup games.")
     parser.add_argument("--competition", choices=sorted(COMPETITION_NAMES), default="E")
-    parser.add_argument("--season", type=int, required=True, help="Start year, e.g. 2024")
+    parser.add_argument("--season", type=int, help="Start year, e.g. 2024 (needed unless --play-by-play)")
     parser.add_argument("--game", type=int, help="Game code; omit to load the whole season")
     parser.add_argument("--cached-only", action="store_true",
                         help="Reload from data/raw/ without any request (e.g. after a loader change)")
+    parser.add_argument("--play-by-play", action="store_true",
+                        help="Cache the play-by-play of every loaded Euroleague/EuroCup game (raw files only)")
     args = parser.parse_args()
+    if args.play_by_play:
+        conn = get_connection()
+        try:
+            raise SystemExit(1 if fetch_play_by_play(conn) else 0)
+        finally:
+            conn.close()
+    if args.season is None:
+        parser.error("--season is required")
     download = not args.cached_only
     if args.game is None:
         failures = ingest_season(args.competition, args.season, download=download)
