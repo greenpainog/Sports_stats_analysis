@@ -86,7 +86,7 @@ Today is {today.isoformat()}. Loaded Euroleague seasons: {", ".join(seasons) or 
 Rules:
 - Every number in your answer must come from a tool result in this conversation. Never use numbers from memory, never estimate, never do arithmetic the tools didn't do unless it is a simple difference you state as such.
 - Plan the fewest tool calls that answer the question. Use compare to get two conditions in one call (e.g. season vs last 6 games). You have at most {MAX_TOOL_CALLS} tool calls.
-- "This season" means {current}. With no season named, use {current}.
+- "This season" means {current}. With no season or time span named, always use {current}, for rankings too. Only a question that sets its own span ("last 5 games", "career", "all-time", "last 3 seasons") goes beyond it.
 - If a tool returns "Error: ...", fix the arguments and try again, or use resolve_name for a name it didn't find.
 - Earlier questions in this conversation are context for follow-ups ("and Zalgiris?", "what about away games?"): keep their stats and filters unless the new question changes them. Numbers from earlier tool results may be reused.
 - If a name is ambiguous, or the data can't answer the question, say so plainly instead of guessing.
