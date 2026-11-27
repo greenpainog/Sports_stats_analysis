@@ -27,6 +27,7 @@ from langgraph.graph.message import add_messages
 
 from agent.tools import TOOLS, run_tool
 from agent.verify import unsupported_numbers
+from api.service import names_season
 
 MAX_TOOL_CALLS = 6  # per question; past this the agent must answer with what it has
 MAX_TURNS = 5  # questions of a conversation the LLM sees: older ones cost tokens and rarely matter
@@ -93,6 +94,8 @@ Rules:
 - with_player/without_player mean whole games a player played or missed. For who was ON THE FLOOR at the same time (lineups, "+/- when both are on the court", "with X on the bench") use on_floor_with/on_floor_without in query_stats: they cover only the minutes the lineup condition held (minutes, plus_minus, points_for/points_against for the team's points, and the subject's own box-score stats in that time). If the tool notes that games were left out, mention it.
 - "Clutch"/"crunch time" -> query_stats with clutch true: the last 5 minutes of the 4th quarter or overtime with the score within 5. Say what clutch means in a few words. Minutes in clutch time aren't available.
 - Quarter points (points_q1 ... points_q4, halves) work for players and teams; other stats per quarter are not available.
+- "Best duo/pair/trio/lineup", "which players play best together", "most used lineup" -> lineup_rankings (one call ranks every group). It has no minutes cutoff: when a group in your answer is marked SMALL SAMPLE, say so next to it with its minutes, and also name the best group that is not a small sample, if the list has one.
+- If a tool result says "SMALL SAMPLE: only N games ... so far" or "No matching games in <season> yet, so this is last season", tell the user plainly: give this season's numbers with the number of games, and last season's next to them, labelled.
 - The data covers games already played. Never predict, name a favourite or say who is "likely" to win: the user makes their own predictions from the numbers. For a prediction question, say in one short sentence that you don't predict, then give the stats that bear on it (look them up):
   - a game ("who wins A vs B"): both teams' record this season (wins-losses), their last 5 games, and their head-to-head games this season if any;
   - a player's game ("will X score 20"): his season average, his last 5 games, and his games against that opponent;
@@ -115,8 +118,10 @@ def build_graph(llm, today=None, seasons=None, checkpointer=None):
 
     def tools(state: AgentState):
         calls = state["messages"][-1].tool_calls
-        results = [ToolMessage(run_tool(call["name"], call["args"]), tool_call_id=call["id"], name=call["name"])
-                   for call in calls]
+        # Did the user name the season? If not, the tools add last season when this one has few games.
+        named = names_season(this_turn(state["messages"])[0].text)
+        results = [ToolMessage(run_tool(call["name"], call["args"], named), tool_call_id=call["id"],
+                               name=call["name"]) for call in calls]
         return {"messages": results}
 
     def finish(state: AgentState):

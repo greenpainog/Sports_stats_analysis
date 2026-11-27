@@ -24,6 +24,7 @@ from analysis.player_rankings import RANKABLE_PLAYER_STATS
 from analysis.rankings import RANKABLE_TEAM_STATS
 from api.models import (
     CompareSide,
+    LineupSpec,
     MatchupSpec,
     Phase,
     PlayerProfileSpec,
@@ -63,7 +64,7 @@ LLMCompareSide = create_model(
 )
 _SPEC_FIELDS = _llm_fields(QuerySpec, **_THRESHOLD)
 _SPEC_FIELDS["compare"] = (Optional[list[LLMCompareSide]], Field(description=QuerySpec.model_fields["compare"].description))
-RankingKind = Literal["team_rankings", "matchup", "player_rankings", "player_profile"]
+RankingKind = Literal["team_rankings", "matchup", "player_rankings", "player_profile", "lineups"]
 RankStat = Literal[tuple(dict.fromkeys(RANKABLE_TEAM_STATS + RANKABLE_PLAYER_STATS))]
 
 
@@ -74,7 +75,8 @@ class LLMRanking(BaseModel):
 
     kind: RankingKind = Field(description=(
         "team_rankings: rank all teams (or where one team ranks); matchup: two teams side by side with ranks; "
-        "player_rankings: list players by a stat (leaders); player_profile: one player's ranks."
+        "player_rankings: list players by a stat (leaders); player_profile: one player's ranks; "
+        "lineups: a team's duos/trios/5-man lineups ranked by how they did on the floor together."
     ))
     stats: Optional[list[RankStat]] = Field(description="Stats to rank on; null means all of them.")
     team: Optional[str] = Field(description=(
@@ -99,6 +101,13 @@ class LLMRanking(BaseModel):
     limit: Optional[int] = Field(description="player_rankings only: how many players to list; null = 10.")
     order: Optional[Literal["highest", "lowest"]] = Field(
         description="null = highest first. 'lowest' when the question wants the fewest/lowest (rank 1 = lowest).")
+    lineup_size: Optional[Literal[2, 3, 4, 5]] = Field(
+        description="lineups only: 2 = duo/pair, 3 = trio, 4, 5 = full lineup; null = 2.")
+    lineup_players: Optional[list[str]] = Field(
+        description="lineups only: players who must be in every listed group ('best duo with X').")
+    lineup_sort: Optional[Literal["net_per_40", "plus_minus", "minutes", "points_for_per_40",
+                                  "points_against_per_40"]] = Field(
+        description="lineups only: null = net_per_40 (plus-minus per 40 minutes, 'best'/'net rating').")
 
 
 LLMQuerySpec = create_model(
@@ -126,7 +135,10 @@ _KIND_FIELDS = {
     "matchup": ("team", "other_team", "side"),
     "player_rankings": ("team", "min_games", "min_minutes", "limit"),
     "player_profile": ("player", "team", "min_games", "min_minutes"),
+    "lineups": ("team", "limit", "lineup_size", "lineup_players", "lineup_sort"),
 }
+# Shared fields lineups can't use (they rank groups of players, not stats).
+_NOT_FOR_LINEUPS = ("stats", "venue", "result", "max_margin", "per")
 
 
 def to_ranking(raw):
@@ -137,6 +149,8 @@ def to_ranking(raw):
     """
     kind = raw["kind"]
     allowed = set(_SHARED) | set(_KIND_FIELDS[kind])
+    if kind == "lineups":
+        allowed -= set(_NOT_FOR_LINEUPS)
     wrong = sorted(k for k, v in raw.items() if k != "kind" and v is not None and k not in allowed)
     if wrong:
         raise ValueError(f"{kind} does not use: {', '.join(wrong)}.")
@@ -154,6 +168,11 @@ def to_ranking(raw):
     if kind == "player_rankings":
         given.setdefault("limit", 10)
         return RankingRequest(kind, PlayerRankingSpec(**given))
+    if kind == "lineups":
+        if "team" not in given:
+            raise ValueError("lineups needs a team.")
+        renamed = {"lineup_size": "size", "lineup_players": "with_players", "lineup_sort": "sort"}
+        return RankingRequest(kind, LineupSpec(**{renamed.get(k, k): v for k, v in given.items()}))
     if "player" not in given:
         raise ValueError("player_profile needs a player.")
     return RankingRequest(kind, PlayerProfileSpec(**given))
@@ -232,6 +251,7 @@ Rankings: for "who leads", "top scorers", "best/worst teams in X", "where does X
 - matchup: two teams side by side with their ranks ("Dubai vs Hapoel stats", "compare Valencia and Besiktas"): team and other_team.
 - player_rankings: players listed by the first stat ("who leads in steals", "top 5 scorers"): limit = the number asked for (null = 10). ranking.team only limits it to one team's players ("ASVEL's best rebounders").
 - player_profile: one player's ranks in every stat ("where does Hifi rank", "Hifi's ranks this season"): player.
+- lineups: a team's best or worst groups of players on the floor together ("Panathinaikos best duo", "Real's best 5-man lineup by net rating", "which pair plays best together for Bayern", "Barcelona's most used lineup", "best trio with Campazzo"): team; lineup_size 2 for duo/pair/tandem, 3 for trio, 5 for lineup/five/unit (null = 2); lineup_players = players who must be in the group; lineup_sort null for best/net rating/plus-minus, "minutes" for most used/plays the most together, "points_for_per_40" for best offense, "points_against_per_40" with order "lowest" for best defense; order "lowest" for the worst; limit = the number asked (null = 10). There is no minutes cutoff: small samples are listed and flagged. Lineups need play-by-play, so not for the Greek league.
 Rank 1 is the highest value. When the question wants the fewest/lowest ("fewest turnovers", "best defense" = lowest def_rating, "allows the fewest points") set order "lowest".
 "allowed"/"conceded"/"opponents' X" -> side "opponent" (teams only). side applies to every stat in the question. Turnovers a team forces ("forced turnovers", "turnovers it causes", "opponent turnovers", "opponent turnover %") -> stats forced_turnovers / forced_tov_pct with side "team", never side "opponent": e.g. "forced turnovers and steals" -> stats [forced_turnovers, steals], side "team" (opponent steals would be the steals made against the team). "per 40 minutes" -> per "per40" (players only); "totals"/"in total" -> per "total". "The most"/"the fewest" of a countable thing with no per-game wording is a total -> per "total", whatever the verb: "who has the most assists", "who scored the most points", "who made the most threes", "who grabbed the most rebounds", "most double-doubles". Only wording like "per game", "a game", "averages" or "leads" makes it per game; "leads in", "leader", "top scorers", "best", "per game", "averages" -> per null (per game).
 Stats for rankings also include advanced ones: possessions, pace, off_rating, def_rating, net_rating, efg_pct, ts_pct, tov_pct, oreb_pct, dreb_pct, ft_rate, fg3a_rate, ast_pct, ast_to, stl_pct, blk_pct, pts_from_paint_pct, forced_turnovers, forced_tov_pct, points_q1-points_q4, points_first_half, points_second_half (teams only); for players also usage_pct, reb_pct, pts_from_2pt_pct, pts_from_3pt_pct, pts_from_ft_pct, points_per_fga, team_pts_share, double_doubles, triple_doubles, starts, games_20_points. "all stats"/"full stats"/no stat named -> stats null (all of them).

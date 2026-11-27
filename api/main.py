@@ -20,7 +20,17 @@ from analysis.stat_query import (
     RESULT_STATS,
     QueryError,
 )
-from api.service import answer_ranking, answer_spec, matchup_spec, player_profile_spec, player_rankings_spec, rankings_spec
+from api.service import (
+    answer_ranking_for_question,
+    answer_spec,
+    answer_spec_for_question,
+    lineups_spec,
+    matchup_spec,
+    names_season,
+    player_profile_spec,
+    player_rankings_spec,
+    rankings_spec,
+)
 from api.models import (
     AgentRequest,
     AgentResponse,
@@ -28,6 +38,8 @@ from api.models import (
     AskRequest,
     AskResponse,
     ErrorResponse,
+    LineupSpec,
+    LineupsResponse,
     MatchupResponse,
     MatchupSpec,
     PlayerProfileResponse,
@@ -130,6 +142,20 @@ def profile(spec: PlayerProfileSpec):
     return player_profile_spec(spec)
 
 
+@app.post(
+    "/lineups",
+    response_model=LineupsResponse,
+    responses={400: {"model": ErrorResponse, "description": "Unknown or ambiguous team or player"}},
+)
+def lineups(spec: LineupSpec):
+    """A team's duos, trios or 5-man lineups ranked by plus-minus per 40 minutes together (or another sort).
+
+    No minimum-minutes cutoff: every group that shared the floor is listed, and
+    groups under 40 minutes together are flagged small_sample.
+    """
+    return lineups_spec(spec)
+
+
 @lru_cache
 def get_llm():
     """The LLM used by /ask. Tests replace it via app.dependency_overrides."""
@@ -158,25 +184,34 @@ def ask(request: AskRequest, llm=Depends(get_llm)):
         spec = {**ranking.spec.model_dump(exclude_none=True), **({"team": ranking.focus_team}
                                                                 if ranking.focus_team else {})}
         try:
-            message, result = answer_ranking(ranking)
+            answer = answer_ranking_for_question(ranking, names_season(question))
         except QueryError as exc:
             return AskResponse(
                 question=question, status="needs_clarification", message=str(exc),
                 ranking_kind=ranking.kind, ranking_spec=spec,
                 candidates=[{"id": i, "name": n} for i, n in exc.candidates],
             )
-        return AskResponse(question=question, status="answered", message=message,
-                           ranking_kind=ranking.kind, ranking_spec=spec, ranking_result=result)
+        return AskResponse(question=question, status="answered", message=answer.text,
+                           ranking_kind=ranking.kind, ranking_spec=spec, ranking_result=answer.result,
+                           **_fallback_fields(answer))
 
     try:
-        result = answer_spec(parsed.spec)
+        answer = answer_spec_for_question(parsed.spec, names_season(question))
     except QueryError as exc:
         return AskResponse(
             question=question, status="needs_clarification", message=str(exc), spec=parsed.spec,
             candidates=[{"id": i, "name": n} for i, n in exc.candidates],
         )
-    return AskResponse(question=question, status="answered", message=result.answer,
-                       spec=parsed.spec, result=result)
+    return AskResponse(question=question, status="answered", message=answer.text,
+                       spec=parsed.spec, result=answer.result, **_fallback_fields(answer))
+
+
+def _fallback_fields(answer):
+    """The AskResponse fields that say whether last season stood in for, or was added to, this one."""
+    if answer.fallback is None:
+        return {}
+    return {"season_fallback": answer.fallback, "fallback_season": answer.previous,
+            "previous_season_result": answer.previous_result}
 
 
 def _without_nulls(value):

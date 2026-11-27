@@ -285,11 +285,16 @@ python -m pytest
   - the team's coach ("Fenerbahce under Jasikevicius") or the game's referee
   - season, several seasons, regular season or playoffs
 - **Season:** a question that names no season or time span means this season, rankings too.
-  "Last 10 games", "career", "all-time" or "last 3 seasons" go wider. (`POST /query` and
+  "Last 10 games", "career", "all-time" or "last 3 seasons" go wider. If this season has no
+  matching games yet, the answer uses last season and says so; with 1-4 games it is flagged as a
+  small sample and last season is shown next to it (unless the question named the season). (`POST /query` and
   `POST /rankings` take the spec as given: no `season` there means every loaded season.)
 - **Comparisons:** 2-4 sides in one question ("with X vs without X", "this season vs last").
 - **Rankings:** every team or player ranked on a stat; where one team or player ranks; two teams
   side by side; a player's rank in all 47 player stats.
+- **Lineups:** a team's best duos, trios or 5-man lineups by plus-minus per 40 minutes together
+  ("Panathinaikos' best duo", "most used lineup", "best trio with Campazzo"). No minutes cutoff:
+  groups under 40 minutes together are listed and flagged as small samples.
 - **Advanced stats:**
   - team: pace, offensive, defensive and net rating, eFG%, TS%, turnover %, rebound %, forced
     turnovers
