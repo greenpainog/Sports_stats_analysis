@@ -40,6 +40,12 @@ EVENT_STATS = {
 }
 
 
+# Each event's share of the possession estimate FGA - OREB + TOV + 0.44 * FTA
+# (the same formula as analysis/advanced.py). Team rebounds and team turnovers
+# (no player) count too; summed per game they match the box-score estimate.
+POSSESSION_WEIGHTS = {"2FGM": 1, "2FGA": 1, "3FGM": 1, "3FGA": 1, "TO": 1, "O": -1, "FTM": 0.44, "FTA": 0.44}
+
+
 def is_clutch(period, elapsed, margin_before):
     left = period_start(period) + period_length(period) - elapsed
     return period >= 4 and left <= CLUTCH_SECONDS_LEFT and abs(margin_before) <= CLUTCH_MARGIN

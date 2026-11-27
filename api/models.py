@@ -14,7 +14,7 @@ from analysis.player_rankings import RANKABLE_PLAYER_STATS
 from analysis.rankings import RANKABLE_TEAM_STATS
 from analysis.stat_query import (
     COUNTING_STATS, MAX_ON_FLOOR_PLAYERS, PBP_BOX_STATS, PERCENTAGE_STATS, QUARTER_STATS, RESULT_STATS,
-    STINT_ONLY_STATS,
+    NOT_IN_CLUTCH, STINT_ONLY_STATS,
 )
 
 # Literal[...] from the tuples gives the JSON schema an exact list of allowed
@@ -154,7 +154,8 @@ class QuerySpec(Filters):
             "Stats to report. Percentages (fg3_pct, ...) are computed from makes and attempts; "
             "win_pct is the win-loss record of the subject's team in the matching games. "
             "points_for / points_against: the team's points scored / allowed while the subject (and any "
-            "on-floor condition) was on the floor."
+            "on-floor condition) was on the floor; possessions and off_rating / def_rating / net_rating "
+            "(points per 100 possessions) in that same time."
         ),
     )
     player: Optional[str] = Field(None, description="Player name, e.g. 'Kendrick Nunn' or 'Nunn'.")
@@ -181,13 +182,13 @@ class QuerySpec(Filters):
         pbp_mode = bool(self.on_floor_with or self.on_floor_without or self.clutch
                         or set(self.stats) & set(STINT_ONLY_STATS))
         if pbp_mode:
-            allowed = {*PBP_BOX_STATS, "plus_minus", "win_pct", *STINT_ONLY_STATS}
-            if not self.clutch:
-                allowed.add("minutes")
+            allowed = {*PBP_BOX_STATS, "plus_minus", "win_pct", "minutes", *STINT_ONLY_STATS}
+            if self.clutch:
+                allowed -= set(NOT_IN_CLUTCH)
             other = sorted(set(self.stats) - allowed)
             if other:
                 raise ValueError(f"With clutch or on-floor filters these stats aren't available: {', '.join(other)} "
-                                 "(clutch time has no minutes; quarter points, shot-list and paint stats need "
+                                 "(clutch time has no minutes, possessions or ratings; quarter points, shot-list and paint stats need "
                                  "the box score).")
         if (pbp_mode or (self.player is not None and set(self.stats) & set(QUARTER_STATS))) \
                 and self.competition == "greek_league":
@@ -517,7 +518,8 @@ class PlayerProfileResponse(BaseModel):
 
 # --- Lineups -----------------------------------------------------------------
 
-LineupSort = Literal["net_per_40", "plus_minus", "minutes", "points_for_per_40", "points_against_per_40"]
+LineupSort = Literal["net_rating", "off_rating", "def_rating", "net_per_40", "plus_minus", "minutes",
+                     "points_for_per_40", "points_against_per_40"]
 
 
 class LineupSpec(BaseModel):
@@ -535,9 +537,10 @@ class LineupSpec(BaseModel):
     seasons: Optional[list[SeasonName]] = Field(None, min_length=2, max_length=10)
     phase: Optional[Phase] = None
     last_n: Optional[int] = Field(None, ge=1, le=100, description="Only the team's N most recent games.")
-    sort: LineupSort = Field("net_per_40", description=(
-        "net_per_40 = plus-minus per 40 minutes together (the default 'best'); plus_minus = total; minutes = most "
-        "used; points_for_per_40 / points_against_per_40 = offense / defense."))
+    sort: LineupSort = Field("net_rating", description=(
+        "net_rating = points scored minus allowed per 100 possessions together (the default 'best'); "
+        "off_rating / def_rating = offense / defense per 100 possessions (def_rating with order 'lowest' = best "
+        "defense); net_per_40 = plus-minus per 40 minutes; plus_minus = total; minutes = most used."))
     order: Literal["highest", "lowest"] = Field(
         "highest", description="'lowest' for the worst lineups, or the best defense with points_against_per_40.")
     limit: int = Field(10, ge=1, le=50, description="Lineups listed; there is no minimum-minutes cutoff.")
@@ -559,6 +562,10 @@ class LineupRow(BaseModel):
     points_against: int
     plus_minus: int
     net_per_40: float = Field(description="Plus-minus per 40 minutes together.")
+    possessions: float = Field(description="Estimated possessions together (average of both teams).")
+    off_rating: Optional[float] = Field(description="Points scored per 100 possessions together.")
+    def_rating: Optional[float] = Field(description="Points allowed per 100 possessions together.")
+    net_rating: Optional[float] = Field(description="off_rating - def_rating.")
     small_sample: bool = Field(description="True when under 40 minutes together: read the per-40 numbers with care.")
 
 

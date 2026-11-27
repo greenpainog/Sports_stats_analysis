@@ -28,6 +28,15 @@ PBP_EVENTS_ADDED_COLUMNS = {
 }
 
 
+# Added later: each team's estimated possessions during the stint, counted from
+# the events (ingestion/euroleague.update_stint_possessions). The stint's own
+# team, and its opponent; NULL until computed.
+STINTS_ADDED_COLUMNS = {
+    "own_possessions": "REAL",
+    "opponent_possessions": "REAL",
+}
+
+
 def _add_missing_columns(cursor, table, columns):
     existing = {row[1] for row in cursor.execute(f"PRAGMA table_info({table})")}
     for name, column_type in columns.items():
@@ -271,6 +280,7 @@ def create_tables():
                 CHECK(end_elapsed >= start_elapsed)
             )
         """)
+        _add_missing_columns(cursor, "stints", STINTS_ADDED_COLUMNS)
         cursor.execute("CREATE INDEX IF NOT EXISTS ix_stints_game ON stints(game_id, team_id)")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS stint_players (

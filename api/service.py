@@ -46,6 +46,9 @@ def _value(s):
     """One stat summary as short text: '45.0% (9/20)', '3-2 (60.0%)', '12.4 per game'."""
     if s.games == 0:
         return "no games"
+    if s.stat in ("off_rating", "def_rating", "net_rating"):
+        sign = "+" if s.stat == "net_rating" else ""
+        return "n/a" if s.value is None else f"{s.value:{sign}.1f} per 100 possessions"
     if s.wins is not None:
         return f"{s.wins}-{s.losses} ({s.pct:.1f}%)"
     if s.attempted is not None:
@@ -222,7 +225,9 @@ def lineups_spec(spec: LineupSpec) -> LineupsResponse:
     r = lineup_rankings(**spec.model_dump())
     rows = [LineupRow(players=l.players, games=l.games, minutes=round(l.minutes, 2), points_for=l.points_for,
                       points_against=l.points_against, plus_minus=l.plus_minus,
-                      net_per_40=round(l.per_40(l.plus_minus), 1), small_sample=l.small_sample)
+                      net_per_40=round(l.per_40(l.plus_minus), 1), small_sample=l.small_sample,
+                      possessions=round(l.possessions, 1),
+                      **{k: None if v is None else round(v, 1) for k, v in l.ratings.items()})
             for l in r.lineups]
     return LineupsResponse(team=r.team, size=r.size, sort=r.sort, order=r.order, filters=r.filters, games=r.games,
                            lineup_count=r.lineup_count, lineups=rows, notes=r.notes, answer=r.describe())

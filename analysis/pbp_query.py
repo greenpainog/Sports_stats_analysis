@@ -16,7 +16,21 @@ by the caller.
 from ingestion.play_by_play import CLUTCH_MARGIN, CLUTCH_SECONDS_LEFT, EVENT_STATS
 
 # Stats that come from the stints (time on the floor).
-STINT_STATS = ("minutes", "plus_minus", "points_for", "points_against")
+STINT_STATS = ("minutes", "plus_minus", "points_for", "points_against", "possessions",
+               "off_rating", "def_rating", "net_rating")
+# Points per 100 possessions on the floor. Possessions are the usual estimate
+# (FGA - OREB + TOV + 0.44 * FTA) counted from the events, averaged over both
+# teams, as in analysis/advanced.py. Summaries divide summed points by summed
+# possessions; they never average per-game ratings.
+RATING_STATS = ("off_rating", "def_rating", "net_rating")
+
+
+def ratings(points_for, points_against, possessions):
+    """{off_rating, def_rating, net_rating} per 100 possessions; None without possessions."""
+    if not possessions:
+        return {stat: None for stat in RATING_STATS}
+    off, defense = 100 * points_for / possessions, 100 * points_against / possessions
+    return {"off_rating": off, "def_rating": defense, "net_rating": off - defense}
 # Percentages that can be built from event counts (not paint_fg_pct: that
 # needs shot coordinates).
 EVENT_PERCENTAGES = ("fg2_pct", "fg3_pct", "ft_pct", "fg_pct")
@@ -80,7 +94,7 @@ def _lineup_conditions(stint_sql, subject_type, subject_id, with_ids, without_id
 
 
 def stint_values(conn, subject_type, subject_id, game_ids, with_ids, without_ids):
-    """{game_id: {minutes, plus_minus, points_for, points_against}} of the on-floor time.
+    """{game_id: {minutes, plus_minus, points_for, points_against, possessions, ratings}} of the on-floor time.
 
     Only games where the condition held for more than 0 seconds are returned.
     """
@@ -92,13 +106,16 @@ def stint_values(conn, subject_type, subject_id, game_ids, with_ids, without_ids
         conditions.append("s.team_id = ?")
         params.append(subject_id)
     rows = conn.execute(
-        f"""SELECT s.game_id, SUM(s.end_elapsed - s.start_elapsed), SUM(s.points_for), SUM(s.points_against)
+        f"""SELECT s.game_id, SUM(s.end_elapsed - s.start_elapsed), SUM(s.points_for), SUM(s.points_against),
+                   (SUM(s.own_possessions) + SUM(s.opponent_possessions)) / 2.0
             FROM stints s WHERE s.game_id IN ({placeholders}) AND {' AND '.join(conditions)}
             GROUP BY s.game_id HAVING SUM(s.end_elapsed - s.start_elapsed) > 0""",
         [*game_ids, *params]).fetchall()
     return {game_id: {"minutes": seconds / 60, "plus_minus": scored - allowed,
-                      "points_for": scored, "points_against": allowed}
-            for game_id, seconds, scored, allowed in rows}
+                      "points_for": scored, "points_against": allowed, "possessions": possessions or 0,
+                      **{k: None if v is None else round(v, 1)
+                         for k, v in ratings(scored, allowed, possessions).items()}}
+            for game_id, seconds, scored, allowed, possessions in rows}
 
 
 def _count_sql(weights):
